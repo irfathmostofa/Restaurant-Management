@@ -152,7 +152,8 @@ export default function OrderTaking() {
         waiterName: staff?.name || '',
         items: kitchenItems,
         defaultPrepTime,
-        printTime: new Date().toISOString()
+        printTime: new Date().toISOString(),
+        logoUrl: settings.restaurant_logo || ''
       })
       printHtml(kotWin, html)
     }

@@ -65,6 +65,7 @@ function receiptStyles(width) {
     .right { text-align: right; }
     .bold { font-weight: 700; }
     .muted { opacity: 0.75; }
+    .logo { max-width: 60%; height: auto; margin: 0 auto 4px; display: block; }
     .title { font-size: ${narrow ? '13px' : '15px'}; font-weight: 700; }
     .line { white-space: nowrap; }
     .row { display: flex; justify-content: space-between; gap: 8px; }
@@ -106,11 +107,13 @@ export function buildKotHtml({
   items,
   defaultPrepTime,
   printTime,
+  logoUrl,
   width = 80
 }) {
   const hasTable = tableNumber != null && tableNumber !== ''
   const inner = `
     <div class="center">
+      ${logoUrl ? `<img class="logo" alt="" src="${esc(logoUrl)}" />` : ''}
       <div class="title">${esc(restaurantName)}</div>
       ${branch ? `<div class="muted">${esc(branch.name)}</div>` : ''}
       <div class="sep"></div>
@@ -160,6 +163,7 @@ export function buildInvoiceHtml({
   changeAmount,
   footer,
   qrData,
+  logoUrl,
   width = 80
 }) {
   const hasTable = tableNumber != null && tableNumber !== ''
@@ -171,6 +175,7 @@ export function buildInvoiceHtml({
 
   const inner = `
     <div class="center">
+      ${logoUrl ? `<img class="logo" alt="" src="${esc(logoUrl)}" />` : ''}
       <div class="title">${esc(restaurantName)}</div>
       ${branch ? `<div class="muted">${esc(branch.name)}</div>` : ''}
       ${branch?.address ? `<div class="muted">${esc(branch.address)}</div>` : ''}

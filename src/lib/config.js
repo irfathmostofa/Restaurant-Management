@@ -32,5 +32,6 @@ export async function fetchSettings() {
 export const DEFAULT_SETTINGS = {
   restaurant_name: 'RestaurantHub',
   invoice_footer: 'Thank you for dining with us!',
-  default_prep_time: '5'
+  default_prep_time: '5',
+  restaurant_logo: ''
 }

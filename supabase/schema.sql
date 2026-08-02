@@ -797,3 +797,35 @@ select b.id, 'T3', 2
 from public.branches b
 where b.name = 'Downtown Bistro'
   and not exists (select 1 from public.tables t where t.branch_id = b.id and t.number = 'T3');
+
+-- ============================================================
+-- Storage (Supabase Storage buckets + object-level RLS)
+-- ============================================================
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values
+  ('product-images', 'product-images', true, 5242880, array['image/jpeg', 'image/png', 'image/webp', 'image/gif']),
+  ('branding', 'branding', true, 5242880, array['image/jpeg', 'image/png', 'image/webp'])
+on conflict (id) do nothing;
+
+-- Public read for images in both buckets.
+drop policy if exists "public_read_product_images" on storage.objects;
+create policy "public_read_product_images" on storage.objects
+  for select using (bucket_id in ('product-images', 'branding'));
+
+-- Authenticated staff may upload / replace / delete images.
+drop policy if exists "staff_write_product_images" on storage.objects;
+create policy "staff_write_product_images" on storage.objects
+  for all using (
+    bucket_id in ('product-images', 'branding')
+    and exists (
+      select 1 from public.staff s
+      where s.user_id = auth.uid()
+    )
+  )
+  with check (
+    bucket_id in ('product-images', 'branding')
+    and exists (
+      select 1 from public.staff s
+      where s.user_id = auth.uid()
+    )
+  );

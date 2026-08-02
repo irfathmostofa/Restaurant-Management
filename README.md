@@ -64,6 +64,11 @@ bootstrap instructions (including how to create your first owner account).
   table, waiter, order time, notes and estimated prep time.
 - **Realtime everywhere** — kitchen status, ETA changes, order-ready
   notifications and payment status all stream via Supabase Realtime.
+- **Image upload to Supabase Storage** — menu-item photos (and the restaurant
+  logo in Settings) are uploaded to public storage buckets. Every image is
+  optimised in the browser **before** upload (downscaled + re-encoded, stepping
+  quality until the file is at least 30% smaller) so storage and load times
+  stay low.
 
 ## Architecture
 
@@ -163,6 +168,20 @@ For deployments created with the V1 schema, run the files in
 3. `003_payments_invoice_fields.sql` — invoice fields + `cashier` role
 4. `004_role_routes_and_settings.sql` — configurable landing routes + settings
 5. `005_realtime.sql` — add tables to the realtime publication
+6. `006_image_storage.sql` — public storage buckets + object-level RLS
+
+## Image storage
+
+- Buckets `product-images` (menu photos) and `branding` (restaurant logo) are
+  created by `schema.sql` / migration 006 and are public-read only.
+- Only authenticated staff (a row in `staff` for the signed-in user) can
+  upload, replace or delete images — enforced by `storage.objects` policies.
+- The client (`src/lib/storage.js`) optimises every image before upload: it is
+  downscaled to a max dimension and re-encoded (WebP when supported), dropping
+  the encode quality until the uploaded file is ≤ 70% of the original
+  (guaranteed ≥ 30% smaller whenever the source allows it).
+- Old images are deleted from storage when a new one replaces them or their
+  menu item is deleted.
 
 ## Out of scope (V1)
 

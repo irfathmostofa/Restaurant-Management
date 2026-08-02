@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import supabase from '../../lib/supabase'
 import PageHeader from '../../components/admin/PageHeader'
+import ImageUploader from '../../components/admin/ImageUploader'
 import { fetchAllRoleRoutes, fetchSettings, DEFAULT_SETTINGS } from '../../lib/config'
 import { ROLES, ROLE_LABELS, DEFAULT_ROUTE_BY_ROLE } from '../../lib/roles'
 
@@ -39,7 +40,8 @@ export default function Settings() {
     const settingsRows = [
       ['restaurant_name', settings.restaurant_name],
       ['invoice_footer', settings.invoice_footer],
-      ['default_prep_time', settings.default_prep_time]
+      ['default_prep_time', settings.default_prep_time],
+      ['restaurant_logo', settings.restaurant_logo]
     ]
     const { error: settingsError } = await supabase
       .from('settings')
@@ -79,6 +81,16 @@ export default function Settings() {
         <div className="bg-white rounded-xl border border-stone-200 p-6">
           <h2 className="font-semibold text-stone-900 mb-4">Restaurant info</h2>
           <div className="space-y-4">
+            <div>
+              <ImageUploader
+                label="Restaurant logo"
+                value={settings.restaurant_logo || ''}
+                onChange={(url) => setSettings({ ...settings, restaurant_logo: url })}
+                bucket="branding"
+                folder="restaurant"
+                maxDimension={512}
+              />
+            </div>
             <div>
               <label className="block text-sm font-medium text-stone-700 mb-1">Restaurant name</label>
               <input value={settings.restaurant_name || ''} onChange={(e) => setSettings({ ...settings, restaurant_name: e.target.value })} className="w-full px-3 py-2 rounded-lg border border-stone-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500" />

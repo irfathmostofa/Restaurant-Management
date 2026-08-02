@@ -250,7 +250,8 @@ export default function Billing() {
         paidAmount: received,
         changeAmount: change,
         footer: settings.invoice_footer || DEFAULT_SETTINGS.invoice_footer,
-        qrData: invoiceNo
+        qrData: invoiceNo,
+        logoUrl: settings.restaurant_logo || ''
       })
       printHtml(win, html)
     }
@@ -281,7 +282,8 @@ export default function Billing() {
       paidAmount: payment.paid_amount ?? payment.amount,
       changeAmount: payment.change_amount ?? 0,
       footer: settings.invoice_footer || DEFAULT_SETTINGS.invoice_footer,
-      qrData: payment.invoice_no || ''
+      qrData: payment.invoice_no || '',
+      logoUrl: settings.restaurant_logo || ''
     })
     printHtml(win, html)
   }

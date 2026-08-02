@@ -9,3 +9,18 @@ html {
 body {
   @apply bg-white text-stone-900 antialiased;
 }
+
+.sidebar-nav-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: #52525b #18181b;
+}
+.sidebar-nav-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+.sidebar-nav-scroll::-webkit-scrollbar-track {
+  background: #18181b;
+}
+.sidebar-nav-scroll::-webkit-scrollbar-thumb {
+  background-color: #52525b;
+  border-radius: 9999px;
+}

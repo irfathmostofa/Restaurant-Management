@@ -47,7 +47,7 @@ export default function Expenses() {
   const [summary, setSummary] = useState({ total: 0, thisMonth: 0, today: 0, byCategory: [] })
   const [staffList, setStaffList] = useState([])
 
-  const effectiveBranchId = canManageExpenses(staff?.role) ? (filters.branchId || activeBranchId) : activeBranchId
+  const effectiveBranchId = canManageExpenses(staff?.role) ? (filters.branchId || null) : activeBranchId
 
   const loadLookups = useCallback(async () => {
     const [catRes, staffRes] = await Promise.all([
@@ -95,16 +95,21 @@ export default function Expenses() {
   const loadSummary = useCallback(async () => {
     const today = new Date()
     const monthStart = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().slice(0, 10)
+    const nextMonthStart = new Date(today.getFullYear(), today.getMonth() + 1, 1).toISOString().slice(0, 10)
     const todayStr = today.toISOString().slice(0, 10)
 
     let base = supabase.from('expenses').select('amount')
-    if (effectiveBranchId) base = base.eq('branch_id', effectiveBranchId)
-    const [allRes, monthRes, todayRes, catRes] = await Promise.all([
-      base,
-      supabase.from('expenses').select('amount').eq('expense_date', monthStart).gte('expense_date', monthStart),
-      supabase.from('expenses').select('amount').eq('expense_date', todayStr),
-      supabase.from('expenses').select('category:expense_categories(name), amount').eq('branch_id', effectiveBranchId)
-    ])
+    let monthQuery = supabase.from('expenses').select('amount').gte('expense_date', monthStart).lt('expense_date', nextMonthStart)
+    let todayQuery = supabase.from('expenses').select('amount').eq('expense_date', todayStr)
+    let catQuery = supabase.from('expenses').select('category:expense_categories(name), amount')
+    if (effectiveBranchId) {
+      base = base.eq('branch_id', effectiveBranchId)
+      monthQuery = monthQuery.eq('branch_id', effectiveBranchId)
+      todayQuery = todayQuery.eq('branch_id', effectiveBranchId)
+      catQuery = catQuery.eq('branch_id', effectiveBranchId)
+    }
+
+    const [allRes, monthRes, todayRes, catRes] = await Promise.all([base, monthQuery, todayQuery, catQuery])
 
     const sum = (rows) => (rows || []).reduce((s, r) => s + Number(r.amount || 0), 0)
     const byCategory = {}

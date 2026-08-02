@@ -54,6 +54,7 @@ export default function ActivityLogs() {
       .from('activity_logs')
       .select('staff_id, user_name, role')
       .order('created_at', { ascending: false })
+      .limit(500)
       .then(({ data }) => {
         const seen = new Map()
         ;(data || []).forEach((l) => {

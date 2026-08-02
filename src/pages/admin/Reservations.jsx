@@ -30,7 +30,8 @@ export default function Reservations() {
     let active = true
     setLoading(true)
     Promise.all([
-      supabase.from('reservations').select('*').eq('branch_id', activeBranchId).order('date').order('time'),
+      // Scope the fetch to the selected day; the page shows one date at a time.
+      supabase.from('reservations').select('*').eq('branch_id', activeBranchId).eq('date', dateFilter).order('time'),
       supabase.from('tables').select('*').eq('branch_id', activeBranchId).order('number')
     ]).then(([resRes, tableRes]) => {
       if (!active) return
@@ -39,7 +40,7 @@ export default function Reservations() {
       setLoading(false)
     })
     return () => { active = false }
-  }, [activeBranchId])
+  }, [activeBranchId, dateFilter])
 
   useEffect(() => {
     if (!activeBranchId) return

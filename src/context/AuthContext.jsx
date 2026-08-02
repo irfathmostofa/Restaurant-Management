@@ -31,7 +31,7 @@ export function AuthProvider({ children }) {
     supabase.auth.getSession().then(({ data }) => {
       setSession(data.session)
       return loadStaff(data.session?.user?.id)
-    }).finally(() => setLoading(false))
+    }).catch(() => {}).finally(() => setLoading(false))
 
     const { data: sub } = supabase.auth.onAuthStateChange((_event, newSession) => {
       setSession(newSession)

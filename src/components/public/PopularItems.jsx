@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
 import supabase from '../../lib/supabase'
 import { usePublicSite } from '../../context/PublicSiteContext'
 import { useCurrency } from '../../context/CurrencyContext'
@@ -21,6 +20,7 @@ export default function PopularItems() {
       .eq('is_featured', true)
       .eq('is_available', true)
       .order('sort_order')
+      .limit(8)
       .then(({ data, error }) => {
         if (!active) return
         if (error) { setItems([]) } else { setItems(data || []) }
@@ -40,13 +40,13 @@ export default function PopularItems() {
             <p className="text-sm font-medium text-brand-600 uppercase tracking-wide mb-1">Customer favourites</p>
             <h2 className="text-3xl font-bold text-stone-900">Popular menu items</h2>
           </div>
-          <Link to="#menu" className="hidden sm:inline-block text-sm font-medium text-brand-600 hover:text-brand-700">
+          <a href="#menu" className="hidden sm:inline-block text-sm font-medium text-brand-600 hover:text-brand-700">
             View full menu →
-          </Link>
+          </a>
         </div>
 
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-5">
-          {items.slice(0, 8).map((item) => (
+          {items.map((item) => (
             <article key={item.id} className="group bg-white rounded-xl border border-stone-200 overflow-hidden hover:shadow-lg hover:border-brand-200 transition-shadow">
               <div className="h-32 bg-stone-100 overflow-hidden">
                 {item.photo_url

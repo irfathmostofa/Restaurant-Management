@@ -67,17 +67,28 @@ export default function Orders() {
     if (!activeBranchId) return
     let active = true
     setLoading(true)
-    Promise.all([
-      supabase.from('orders').select('*').eq('branch_id', activeBranchId).order('created_at', { ascending: false }),
-      supabase.from('order_items').select('*').eq('branch_id', activeBranchId),
-      supabase.from('tables').select('id, number').eq('branch_id', activeBranchId)
-    ]).then(([ordersRes, itemsRes, tablesRes]) => {
-      if (!active) return
-      if (!ordersRes.error) setOrders(ordersRes.data || [])
-      if (!itemsRes.error) setItemsByOrder(groupBy(itemsRes.data, 'order_id'))
-      if (!tablesRes.error) setTables(tablesRes.data || [])
-      setLoading(false)
-    })
+    // The kitchen display only needs in-flight orders plus recent history;
+    // fetching every order ever placed would grow without bound over time.
+    const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+    supabase
+      .from('orders')
+      .select('*')
+      .eq('branch_id', activeBranchId)
+      .or(`status.in.(received,preparing,ready,served),created_at.gt.${cutoff}`)
+      .order('created_at', { ascending: false })
+      .then(async ({ data: ordersData, error: ordersError }) => {
+        if (!active) return
+        if (!ordersError && ordersData) setOrders(ordersData)
+        // Load items only for the orders currently shown.
+        const ids = (ordersData || []).map((o) => o.id)
+        if (ids.length > 0) {
+          const { data: itemsData } = await supabase.from('order_items').select('*').in('order_id', ids)
+          if (active && itemsData) setItemsByOrder(groupBy(itemsData, 'order_id'))
+        }
+        const { data: tablesData } = await supabase.from('tables').select('id, number').eq('branch_id', activeBranchId)
+        if (active && tablesData) setTables(tablesData)
+        setLoading(false)
+      })
     return () => { active = false }
   }, [activeBranchId])
 

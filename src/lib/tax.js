@@ -68,15 +68,26 @@ export function computeTotals({ subtotal, discount = 0, taxSettings }) {
   let vat = 0
   let tax = 0
   if (t.price_includes_tax) {
-    if (t.is_vat_enabled && vatRate > 0) vat = round2(discounted - discounted / (1 + vatRate / 100))
-    if (t.is_tax_enabled && taxRate > 0) tax = round2(discounted - discounted / (1 + taxRate / 100))
+    // Menu prices already include VAT/tax. The customer pays the discounted
+    // price; VAT/tax are informational breakdowns of the amount embedded in
+    // the price, derived from the combined net base.
+    const totalRate = (t.is_vat_enabled ? vatRate : 0) + (t.is_tax_enabled ? taxRate : 0)
+    if (totalRate > 0) {
+      const net = round2(discounted / (1 + totalRate / 100))
+      if (t.is_vat_enabled && vatRate > 0) vat = round2((net * vatRate) / 100)
+      if (t.is_tax_enabled && taxRate > 0) tax = round2((net * taxRate) / 100)
+    }
   } else {
     if (t.is_vat_enabled && vatRate > 0) vat = round2((discounted * vatRate) / 100)
     if (t.is_tax_enabled && taxRate > 0) tax = round2((discounted * taxRate) / 100)
   }
 
   const serviceCharge = t.service_charge_enabled && svcRate > 0 ? round2((base * svcRate) / 100) : 0
-  const grandTotal = round2(discounted + vat + tax + serviceCharge)
+  // In inclusive mode the total is the (already tax-inclusive) discounted
+  // amount plus the service charge; taxes must not be added again on top.
+  const grandTotal = round2(
+    t.price_includes_tax ? discounted + serviceCharge : discounted + vat + tax + serviceCharge
+  )
 
   return { subtotal: base, discount: disc, vat, tax, serviceCharge, grandTotal }
 }

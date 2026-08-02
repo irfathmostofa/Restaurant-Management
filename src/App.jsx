@@ -1,4 +1,4 @@
-import { lazy } from 'react'
+import { lazy, Suspense } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider } from './context/AuthContext'
 import { BranchProvider } from './context/BranchContext'
@@ -34,42 +34,52 @@ export default function App() {
   return (
     <AuthProvider>
       <CurrencyProvider>
-        <Routes>
-          {/* Public customer website */}
-          <Route path="/" element={<PublicSite />} />
-          <Route path="/branch/:branchId" element={<PublicSite />} />
+        <Suspense fallback={<PageLoader />}>
+          <Routes>
+            {/* Public customer website */}
+            <Route path="/" element={<PublicSite />} />
+            <Route path="/branch/:branchId" element={<PublicSite />} />
 
-          {/* Admin portal */}
-          <Route path="/admin/login" element={<Login />} />
-          <Route path="/admin/forbidden" element={<Forbidden />} />
-          <Route path="/admin" element={<AdminRoute />}>
-            <Route element={<BranchProvider />}>
-              <Route element={<AdminShell />}>
-                <Route index element={<RoleHome />} />
-                <Route path="dashboard" element={<Dashboard />} />
-                <Route path="branches" element={<Branches />} />
-                <Route path="menu" element={<Menu />} />
-                <Route path="tables" element={<Tables />} />
-                <Route path="reservations" element={<Reservations />} />
-                <Route path="staff" element={<Staff />} />
-                <Route path="orders" element={<Orders />} />
-                <Route path="reports" element={<Reports />} />
-                <Route path="order-taking" element={<OrderTaking />} />
-                <Route path="billing" element={<Billing />} />
-                <Route path="payment-methods" element={<PaymentMethods />} />
-                <Route path="settings" element={<Settings />} />
-                <Route path="invoices" element={<Invoices />} />
-                <Route path="expenses" element={<Expenses />} />
-                <Route path="profile" element={<Profile />} />
-                <Route path="activity-logs" element={<ActivityLogs />} />
-                <Route path="tax-settings" element={<TaxSettings />} />
+            {/* Admin portal */}
+            <Route path="/admin/login" element={<Login />} />
+            <Route path="/admin/forbidden" element={<Forbidden />} />
+            <Route path="/admin" element={<AdminRoute />}>
+              <Route element={<BranchProvider />}>
+                <Route element={<AdminShell />}>
+                  <Route index element={<RoleHome />} />
+                  <Route path="dashboard" element={<Dashboard />} />
+                  <Route path="branches" element={<Branches />} />
+                  <Route path="menu" element={<Menu />} />
+                  <Route path="tables" element={<Tables />} />
+                  <Route path="reservations" element={<Reservations />} />
+                  <Route path="staff" element={<Staff />} />
+                  <Route path="orders" element={<Orders />} />
+                  <Route path="reports" element={<Reports />} />
+                  <Route path="order-taking" element={<OrderTaking />} />
+                  <Route path="billing" element={<Billing />} />
+                  <Route path="payment-methods" element={<PaymentMethods />} />
+                  <Route path="settings" element={<Settings />} />
+                  <Route path="invoices" element={<Invoices />} />
+                  <Route path="expenses" element={<Expenses />} />
+                  <Route path="profile" element={<Profile />} />
+                  <Route path="activity-logs" element={<ActivityLogs />} />
+                  <Route path="tax-settings" element={<TaxSettings />} />
+                </Route>
               </Route>
             </Route>
-          </Route>
 
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </Suspense>
       </CurrencyProvider>
     </AuthProvider>
+  )
+}
+
+function PageLoader() {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-gray-50 text-gray-500">
+      Loading…
+    </div>
   )
 }

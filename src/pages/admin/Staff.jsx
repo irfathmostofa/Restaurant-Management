@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import supabase from '../../lib/supabase'
 import { useBranch } from '../../context/BranchContext'
 import { useAuth } from '../../context/AuthContext'
@@ -33,16 +33,16 @@ export default function Staff() {
     canEditRole ? true : value !== ROLES.OWNER && value !== ROLES.ADMIN
   )
 
-  useEffect(() => { load() }, [me?.branch_id])
-
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true)
     let query = supabase.from('staff').select('*').order('name')
     if (isManager) query = query.eq('branch_id', me?.branch_id)
     const { data, error } = await query
     if (!error) setStaff(data || [])
     setLoading(false)
-  }
+  }, [isManager, me?.branch_id])
+
+  useEffect(() => { load() }, [load])
 
   if (!canManageStaff(me?.role)) {
     return (
@@ -163,8 +163,9 @@ export default function Staff() {
 
   const canActOn = (s) => {
     if (isFullManager) return true
-    // Managers: same branch only, never owner/admin, never themselves is fine
-    return s.branch_id === me?.branch_id && s.role !== ROLES.OWNER && s.role !== ROLES.ADMIN
+    // Managers: same branch only, never owner/admin accounts, and never
+    // themselves (a manager must not deactivate their own account).
+    return s.branch_id === me?.branch_id && s.role !== ROLES.OWNER && s.role !== ROLES.ADMIN && s.id !== me?.id
   }
 
   return (

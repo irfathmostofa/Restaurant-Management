@@ -4,7 +4,7 @@ import { useMenuData } from '../../context/MenuDataContext'
 import supabase from '../../lib/supabase'
 
 export default function Hero() {
-  const { branches, selectedBranchId, selectedBranch } = usePublicSite()
+  const { branches, selectedBranchId, selectedBranch, selectBranch } = usePublicSite()
   const { setBranchId } = useMenuData()
 
   const [form, setForm] = useState({
@@ -55,7 +55,11 @@ export default function Hero() {
   }, [selectedBranchId, form.date])
 
   const handleChange = (e) => {
-    setForm({ ...form, [e.target.name]: e.target.value })
+    const { name, value } = e.target
+    // Keep the branch selector in the header and the availability widget in
+    // sync with the reservation form's branch picker.
+    if (name === 'branch_id' && value) selectBranch(value)
+    setForm({ ...form, [name]: value })
     setSuccess(null)
   }
 

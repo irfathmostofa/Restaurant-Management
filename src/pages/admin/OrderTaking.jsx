@@ -25,6 +25,7 @@ export default function OrderTaking() {
   const [orderType, setOrderType] = useState('dine-in')
   const [selectedTable, setSelectedTable] = useState(null)
   const [customerName, setCustomerName] = useState('')
+  const [orderNotes, setOrderNotes] = useState('')
   const [cart, setCart] = useState([]) // { menu_item_id, name, price, quantity, notes, requires_kitchen }
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState(null)
@@ -49,10 +50,21 @@ export default function OrderTaking() {
     return () => { active = false }
   }, [activeBranchId])
 
-  // Keyboard shortcut: "/" focuses search, Enter submits when cart is ready.
+  // Keyboard shortcuts: "/" focuses search, Enter submits a ready cart.
   useEffect(() => {
     const onKey = (e) => {
       const tag = e.target?.tagName?.toLowerCase()
+      if (e.key === 'Enter') {
+        // Enter submits the order unless the user is editing a multi-line
+        // field. Prevents accidental submits while typing line notes.
+        if (tag === 'textarea' || tag === 'select') return
+        if (e.shiftKey || e.metaKey || e.ctrlKey || e.altKey) return
+        if (canSubmitRef.current) {
+          e.preventDefault()
+          submitRef.current?.()
+        }
+        return
+      }
       if (tag === 'input' || tag === 'textarea' || tag === 'select') return
       if (e.key === '/' && searchRef.current) {
         e.preventDefault()
@@ -72,6 +84,11 @@ export default function OrderTaking() {
       return true
     })
   }, [menuItems, activeCategory, search])
+
+  // Hold the latest submit handler + cart state in refs so the keyboard
+  // listener below never sees stale closures.
+  const submitRef = useRef(null)
+  const canSubmitRef = useRef(false)
 
   if (!activeBranch) {
     return <p className="text-stone-500">Select a branch to take orders.</p>;
@@ -135,18 +152,17 @@ export default function OrderTaking() {
     const kotWin = hasKitchenInCart ? openPrintWindow() : null;
 
     const { data: order, error: orderError } = await supabase
-      .from("orders")
-      .insert([
-        {
-          branch_id: activeBranchId,
-          table_id: orderType === "dine-in" ? selectedTable : null,
-          type: orderType,
-          // Orders with only non-kitchen items are ready immediately.
-          status: hasKitchenInCart ? "received" : "ready",
-          staff_id: staff?.id || null,
-          customer_name: customerName || null,
-        },
-      ])
+      .from('orders')
+      .insert([{
+        branch_id: activeBranchId,
+        table_id: orderType === 'dine-in' ? selectedTable : null,
+        type: orderType,
+        // Orders with only non-kitchen items are ready immediately.
+        status: hasKitchenInCart ? 'received' : 'ready',
+        staff_id: staff?.id || null,
+        customer_name: customerName || null,
+        notes: orderNotes.trim() || null
+      }])
       .select()
       .single();
 
@@ -180,10 +196,14 @@ export default function OrderTaking() {
       .from("order_items")
       .insert(itemsPayload);
     if (itemsError) {
-      if (kotWin) kotWin.close();
-      setSubmitting(false);
-      setError(itemsError.message);
-      return;
+      // Roll back the empty order so we never leave an orphaned row behind.
+      await supabase.from('orders').delete().eq('id', order.id).select().then(({ error: delError }) => {
+        if (delError) console.error('Failed to roll back orphaned order:', delError.message)
+      })
+      if (kotWin) kotWin.close()
+      setSubmitting(false)
+      setError(itemsError.message)
+      return
     }
 
     if (orderType === "dine-in") {
@@ -225,11 +245,16 @@ export default function OrderTaking() {
 
     setSubmitting(false)
     // Success → reset cart, navigate to billing to collect payment.
-    setCart([]);
-    setCustomerName("");
-    setSelectedTable(null);
-    navigate("/admin/billing", { state: { newOrderId: order.id } });
-  };
+    setCart([])
+    setCustomerName('')
+    setOrderNotes('')
+    setSelectedTable(null)
+    navigate('/admin/billing', { state: { newOrderId: order.id } })
+  }
+
+  // Refresh refs each render so the global keyboard handler stays in sync.
+  submitRef.current = submitOrder
+  canSubmitRef.current = cart.length > 0 && !submitting
 
   return (
     <div>
@@ -302,6 +327,15 @@ export default function OrderTaking() {
                   value={customerName}
                   onChange={(e) => setCustomerName(e.target.value)}
                   placeholder="Customer name (optional)"
+                  className="w-full px-3 py-2 rounded-lg border border-stone-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                />
+              </div>
+
+              <div className="flex-1 min-w-[200px]">
+                <input
+                  value={orderNotes}
+                  onChange={(e) => setOrderNotes(e.target.value)}
+                  placeholder="Order notes (optional)"
                   className="w-full px-3 py-2 rounded-lg border border-stone-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
                 />
               </div>

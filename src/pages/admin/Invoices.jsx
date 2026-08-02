@@ -34,6 +34,7 @@ export default function Invoices() {
   const [loading, setLoading] = useState(true)
   const [methods, setMethods] = useState([])
   const [cashiers, setCashiers] = useState([])
+  const [tablesMap, setTablesMap] = useState({})
   const [viewing, setViewing] = useState(null)
   const [printing, setPrinting] = useState(false)
   const [error, setError] = useState(null)
@@ -42,10 +43,16 @@ export default function Invoices() {
   useEffect(() => {
     Promise.all([
       supabase.from('payment_methods').select('*').order('name'),
-      supabase.from('staff').select('id, name').order('name')
-    ]).then(([mRes, cRes]) => {
+      supabase.from('staff').select('id, name').order('name'),
+      supabase.from('tables').select('id, number')
+    ]).then(([mRes, cRes, tRes]) => {
       if (!mRes.error) setMethods(mRes.data || [])
       if (!cRes.error) setCashiers(cRes.data || [])
+      if (!tRes.error) {
+        const map = {}
+        ;(tRes.data || []).forEach((t) => { map[t.id] = t.number })
+        setTablesMap(map)
+      }
     })
   }, [])
 
@@ -105,7 +112,7 @@ export default function Invoices() {
       orderNo: shortOrderNo(order?.id),
       orderTime: order?.created_at || payment.paid_at,
       cashierName: payment.cashier?.name || '',
-      tableNumber: order?.table_id ? undefined : undefined,
+      tableNumber: order?.table_id ? tablesMap[order.table_id] : undefined,
       customerName: order?.customer_name,
       items,
       subtotal: payment.subtotal ?? 0,

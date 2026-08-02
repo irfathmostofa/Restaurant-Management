@@ -3,7 +3,7 @@ import supabase from './supabase'
 const DEFAULT_MAX_DIMENSION = 1600
 const DEFAULT_QUALITY_STEPS = [0.85, 0.7, 0.55, 0.4, 0.3]
 const TARGET_SIZE_RATIO = 0.7 // upload at most 70% of the original size (>= 30% smaller)
-const NOT_REENCODABLE = new Set(['image/gif', 'image/svg+xml'])
+const NOT_REENCODABLE = new Set(['image/gif'])
 
 let webpSupport
 
@@ -30,6 +30,7 @@ function formatFor(mime) {
 function extFor(mime) {
   if (mime === 'image/webp') return '.webp'
   if (mime === 'image/png') return '.png'
+  if (mime === 'image/gif') return '.gif'
   return '.jpg'
 }
 
@@ -81,9 +82,13 @@ export async function optimizeImage(file, { maxDimension = DEFAULT_MAX_DIMENSION
   if (!file || !/^image\//.test(file.type)) {
     throw new Error('Please choose an image file (JPEG, PNG or WebP).')
   }
+  // SVG is a script-carrying vector format and an XSS vector; never accept it.
+  if (file.type === 'image/svg+xml') {
+    throw new Error('SVG images are not supported for security reasons.')
+  }
   const sizeBefore = file.size
 
-  // Formats we cannot re-encode without losing data (animation / vector).
+  // Formats we cannot re-encode without losing data (animation).
   if (NOT_REENCODABLE.has(file.type)) {
     return {
       blob: file,
@@ -113,6 +118,19 @@ export async function optimizeImage(file, { maxDimension = DEFAULT_MAX_DIMENSION
     if (blob.size <= target) break
   }
 
+  // Never-grow guarantee: if re-encoding did not yield a smaller file, keep
+  // the original bytes instead.
+  if (!best || best.size >= sizeBefore) {
+    return {
+      blob: file,
+      url: URL.createObjectURL(file),
+      sizeBefore,
+      sizeAfter: sizeBefore,
+      reducedPct: 0,
+      format: file.type
+    }
+  }
+
   const reducedPct = sizeBefore > 0 ? Math.round((1 - best.size / sizeBefore) * 100) : 0
   return {
     blob: best,
@@ -131,11 +149,17 @@ export async function optimizeImage(file, { maxDimension = DEFAULT_MAX_DIMENSION
 export async function uploadImage({ bucket = 'product-images', folder = 'menu', file, maxDimension }) {
   const optimized = await optimizeImage(file, { maxDimension })
   const path = `${folder}/${Date.now()}-${slugify(file.name)}${extFor(optimized.format)}`
-  const { error } = await supabase.storage
-    .from(bucket)
-    .upload(path, optimized.blob, { contentType: optimized.format, cacheControl: '31536000', upsert: false })
-  if (error) {
-    throw new Error(error.message || 'Upload failed.')
+  try {
+    const { error } = await supabase.storage
+      .from(bucket)
+      .upload(path, optimized.blob, { contentType: optimized.format, cacheControl: '31536000', upsert: false })
+    if (error) {
+      throw new Error(error.message || 'Upload failed.')
+    }
+  } finally {
+    // The preview object URL is only used for optimization bookkeeping; it is
+    // never shown, so release it to avoid leaking memory.
+    URL.revokeObjectURL(optimized.url)
   }
   const { data: { publicUrl } } = supabase.storage.from(bucket).getPublicUrl(path)
   return {

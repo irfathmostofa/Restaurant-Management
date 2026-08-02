@@ -32,27 +32,17 @@ export default function Reservations() {
     let active = true;
     setLoading(true);
     Promise.all([
-      supabase
-        .from("reservations")
-        .select("*")
-        .eq("branch_id", activeBranchId)
-        .order("date")
-        .order("time"),
-      supabase
-        .from("tables")
-        .select("*")
-        .eq("branch_id", activeBranchId)
-        .order("number"),
+      // Scope the fetch to the selected day; the page shows one date at a time.
+      supabase.from('reservations').select('*').eq('branch_id', activeBranchId).eq('date', dateFilter).order('time'),
+      supabase.from('tables').select('*').eq('branch_id', activeBranchId).order('number')
     ]).then(([resRes, tableRes]) => {
-      if (!active) return;
-      if (!resRes.error) setReservations(resRes.data || []);
-      if (!tableRes.error) setTables(tableRes.data || []);
-      setLoading(false);
-    });
-    return () => {
-      active = false;
-    };
-  }, [activeBranchId, saving]);
+      if (!active) return
+      if (!resRes.error) setReservations(resRes.data || [])
+      if (!tableRes.error) setTables(tableRes.data || [])
+      setLoading(false)
+    })
+    return () => { active = false }
+  }, [activeBranchId, dateFilter])
 
   useEffect(() => {
     if (!activeBranchId) return;

@@ -74,6 +74,7 @@ export default function TaxSettings() {
   const [error, setError] = useState(null)
   const [overrideTarget, setOverrideTarget] = useState('') // branch_id or ''
   const [overrideDraft, setOverrideDraft] = useState({})
+  const [touchedKeys, setTouchedKeys] = useState(new Set())
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -123,21 +124,17 @@ export default function TaxSettings() {
       service_charge_rate: Number(global.service_charge_rate) || 0,
       price_includes_tax: !!global.price_includes_tax
     }
-    const { error } = await supabase
+    // Resolve the row id first (the settings row is single-row; it may not
+    // exist yet), then update or insert accordingly.
+    const { data: existing } = await supabase
       .from('tax_settings')
-      .update(payload)
-      .eq('id', global.id)
       .select('id')
+      .limit(1)
       .maybeSingle()
-
-    if (error && /No rows/.test(error.message)) {
-      const { error: insertError } = await supabase.from('tax_settings').insert([payload])
-      if (insertError) { setError(insertError.message); setSaving(false); return }
-    } else if (error) {
-      setError(error.message)
-      setSaving(false)
-      return
-    }
+    const { error } = existing
+      ? await supabase.from('tax_settings').update(payload).eq('id', existing.id)
+      : await supabase.from('tax_settings').insert([payload])
+    if (error) { setError(error.message); setSaving(false); return }
     setSaving(false)
     setSaved(true)
     logActivity({ module: 'tax', action: 'update', description: 'Updated global tax/VAT settings' })
@@ -149,18 +146,45 @@ export default function TaxSettings() {
     const draft = mergeOverride(base, overrideRows[branchId])
     setOverrideTarget(branchId)
     setOverrideDraft(draft)
+    setTouchedKeys(new Set())
     setError(null)
   }
 
-  const setDraft = (key, value) => setOverrideDraft((d) => ({ ...d, [key]: value }))
+  const setDraft = (key, value) => {
+    setOverrideDraft((d) => ({ ...d, [key]: value }))
+    setTouchedKeys((prev) => new Set(prev).add(key))
+  }
+
+  // Normalizes a draft value to what is stored in the database (numeric
+  // fields are stored as numbers; empty numeric input means "fall back").
+  const normalizeVal = (key, value) => {
+    const field = FIELDS.find((f) => f.key === key)
+    if (field?.type === 'boolean') return !!value
+    if (field?.type === 'number') {
+      if (value === '' || value === undefined || value === null) return null
+      const n = Number(value)
+      return Number.isFinite(n) ? n : null
+    }
+    return value === undefined || value === null ? null : String(value)
+  }
 
   const saveOverride = async (e) => {
     e.preventDefault()
     if (!overrideTarget) return
     setSaving(true)
     setError(null)
+    // Partial override: only persist fields the user actually changed.
+    // Untouched fields keep their existing value on update, or NULL on insert
+    // (so they keep falling back to the global configuration).
     const payload = {}
-    OVERRIDE_KEYS.forEach((k) => { payload[k] = overrideDraft[k] })
+    OVERRIDE_KEYS.forEach((k) => {
+      if (touchedKeys.has(k)) payload[k] = normalizeVal(k, overrideDraft[k])
+    })
+    if (Object.keys(payload).length === 0) {
+      setSaving(false)
+      setOverrideTarget('')
+      return
+    }
     const { error } = await supabase
       .from('branch_tax_settings')
       .upsert({ branch_id: overrideTarget, ...payload }, { onConflict: 'branch_id' })

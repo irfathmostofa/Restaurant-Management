@@ -94,17 +94,17 @@ export default function Settings() {
       decimal_precision: Number(currencyForm.decimal_precision),
       thousand_separator: currencyForm.thousand_separator || ','
     }
-    const { error } = await supabase
+    // Resolve the row id first (the settings row is single-row; it may not
+    // exist yet), then update or insert accordingly.
+    const { data: existing } = await supabase
       .from('currency_settings')
-      .update(payload)
-      .eq('id', currency.id)
       .select('id')
+      .limit(1)
       .maybeSingle()
-
-    if (error && /No rows/.test(error.message)) {
-      const { error: insertError } = await supabase.from('currency_settings').insert([payload])
-      if (insertError) { setCurrencyError(insertError.message); setCurrencySaving(false); return }
-    } else if (error) {
+    const { error } = existing
+      ? await supabase.from('currency_settings').update(payload).eq('id', existing.id)
+      : await supabase.from('currency_settings').insert([payload])
+    if (error) {
       setCurrencyError(error.message)
       setCurrencySaving(false)
       return

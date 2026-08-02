@@ -55,9 +55,22 @@ export default function Profile() {
     e.preventDefault()
     setPwError(null)
     setPwMsg(null)
+    if (!pwForm.current) { setPwError('Enter your current password.'); return }
     if (pwForm.next.length < 6) { setPwError('New password must be at least 6 characters.'); return }
     if (pwForm.next !== pwForm.confirm) { setPwError('New passwords do not match.'); return }
     setPwSaving(true)
+
+    // Verify the current password before allowing the change.
+    const { error: verifyError } = await supabase.auth.signInWithPassword({
+      email: staff.email,
+      password: pwForm.current
+    })
+    if (verifyError) {
+      setPwSaving(false)
+      setPwError('Current password is incorrect.')
+      return
+    }
+
     const { error } = await supabase.auth.updateUser({ password: pwForm.next })
     setPwSaving(false)
     if (error) { setPwError(error.message); return }
@@ -145,6 +158,10 @@ export default function Profile() {
 
           <form onSubmit={changePassword} className="bg-white rounded-xl border border-stone-200 p-6 space-y-4">
             <h2 className="font-semibold text-stone-900">Change password</h2>
+            <div>
+              <label className="block text-sm font-medium text-stone-700 mb-1">Current password</label>
+              <input type="password" value={pwForm.current} onChange={(e) => setPwForm({ ...pwForm, current: e.target.value })} autoComplete="current-password" className="w-full px-3 py-2 rounded-lg border border-stone-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500" />
+            </div>
             <div>
               <label className="block text-sm font-medium text-stone-700 mb-1">New password</label>
               <input type="password" value={pwForm.next} onChange={(e) => setPwForm({ ...pwForm, next: e.target.value })} minLength={6} autoComplete="new-password" className="w-full px-3 py-2 rounded-lg border border-stone-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500" />

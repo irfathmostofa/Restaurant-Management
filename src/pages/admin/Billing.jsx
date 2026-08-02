@@ -65,17 +65,28 @@ export default function Billing() {
     if (!activeBranchId) return
     let active = true
     setLoading(true)
+    // Fetch billable (in-flight) orders always, plus completed orders from the
+    // last 24h for the "Show paid" toggle — not the entire order history.
+    const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
     Promise.all([
-      supabase.from('orders').select('*').eq('branch_id', activeBranchId).order('created_at', { ascending: false }),
-      supabase.from('order_items').select('*').eq('branch_id', activeBranchId),
+      supabase.from('orders')
+        .select('*')
+        .eq('branch_id', activeBranchId)
+        .or(`status.in.(received,preparing,ready,served),created_at.gt.${cutoff}`)
+        .order('created_at', { ascending: false }),
       supabase.from('tables').select('*').eq('branch_id', activeBranchId),
       supabase.from('branch_payment_methods').select('payment_methods(*)').eq('branch_id', activeBranchId).eq('is_enabled', true),
       supabase.from('payments').select('*').eq('branch_id', activeBranchId),
       supabase.from('staff').select('id, name')
-    ]).then(([ordersRes, itemsRes, tablesRes, bpmRes, payRes, staffRes]) => {
+    ]).then(async ([ordersRes, tablesRes, bpmRes, payRes, staffRes]) => {
       if (!active) return
       if (!ordersRes.error) setOrders(ordersRes.data || [])
-      if (!itemsRes.error) setItemsByOrder(groupBy(itemsRes.data, 'order_id'))
+      // Load items only for the orders currently shown.
+      const ids = (ordersRes.data || []).map((o) => o.id)
+      if (ids.length > 0) {
+        const { data: itemsData } = await supabase.from('order_items').select('*').in('order_id', ids)
+        if (active && itemsData) setItemsByOrder(groupBy(itemsData, 'order_id'))
+      }
       if (!tablesRes.error) setTables(tablesRes.data || [])
       if (!staffRes.error) {
         const map = {}
@@ -188,6 +199,15 @@ export default function Billing() {
   const processPayment = async () => {
     if (!payingOrder) return
     const order = orders.find((o) => o.id === payingOrder)
+    if (!order) {
+      setError('This order no longer exists.')
+      return
+    }
+    if (order.status === 'paid' || order.status === 'cancelled') {
+      setError(`This order is already ${order.status} and cannot be charged again.`)
+      setPayingOrder(null)
+      return
+    }
     if (!selectedMethod) {
       setError('No payment method selected.')
       return
@@ -224,9 +244,19 @@ export default function Billing() {
       setPaying(false)
       return
     }
-    await supabase.from('orders').update({ status: 'paid' }).eq('id', payingOrder)
+
+    const { error: orderError } = await supabase.from('orders').update({ status: 'paid' }).eq('id', payingOrder)
+    if (orderError) {
+      // The payment was recorded, but the order could not be marked paid.
+      // Surface the problem instead of silently leaving an inconsistent state.
+      if (win) win.close()
+      setError('Payment recorded, but the order could not be updated. Please refresh.')
+      setPaying(false)
+      return
+    }
     if (order?.table_id) {
-      await supabase.from('tables').update({ status: 'available' }).eq('id', order.table_id)
+      const { error: tableError } = await supabase.from('tables').update({ status: 'available' }).eq('id', order.table_id)
+      if (tableError) console.error('Failed to free table after payment:', tableError.message)
     }
 
     const orderId = payingOrder

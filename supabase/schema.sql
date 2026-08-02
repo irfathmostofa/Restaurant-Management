@@ -766,7 +766,7 @@ create policy staff_write_manager on public.staff
   with check (
     (select role from public.current_staff()) = 'manager'
     and branch_id = public.branch_scope()
-    and new.role not in ('owner', 'admin')
+    and role not in ('owner', 'admin')
   );
 
 -- Self service: every staff member may update their own profile row.
@@ -1240,7 +1240,6 @@ select b.id, 'T3', 2
 from public.branches b
 where b.name = 'Downtown Bistro'
   and not exists (select 1 from public.tables t where t.branch_id = b.id and t.number = 'T3');
-
 -- ---------- Featured (popular) demo dishes ----------
 update public.menu_items set is_featured = true
 where name in ('Grilled Chicken', 'Chocolate Lava Cake', 'Garlic Bread', 'Fresh Lemonade');
@@ -1305,28 +1304,27 @@ create policy "staff_write_expense_attachments" on storage.objects
       where s.user_id = auth.uid()
     )
   );
-
 -- ============================================================
 -- Scheduled cleanup (activity logs older than 7 days)
 -- ============================================================
-do $$
+do $setup$
 begin
   create extension if not exists pg_cron;
 exception when others then
   raise notice 'pg_cron not available; run public.cleanup_activity_logs() manually.';
 end;
-$$;
+$setup$;
 
-do $$
+do $schedule$
 begin
-  if exists (select 1 from pg_proc where proname = 'cron.schedule') then
+  if exists (select 1 from pg_extension where extname = 'pg_cron') then
     if not exists (select 1 from cron.job where jobname = 'cleanup-old-activity-logs') then
       perform cron.schedule(
         'cleanup-old-activity-logs',
         '0 3 * * *',
-        $$select public.cleanup_activity_logs()$$
+        $cron$select public.cleanup_activity_logs()$cron$
       );
     end if;
   end if;
 end;
-$$;
+$schedule$;

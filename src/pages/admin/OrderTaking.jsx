@@ -1,0 +1,259 @@
+import { useEffect, useState } from 'react'
+import { useNavigate, Link } from 'react-router-dom'
+import supabase from '../../lib/supabase'
+import { useBranch } from '../../context/BranchContext'
+import { useAuth } from '../../context/AuthContext'
+import PageHeader from '../../components/admin/PageHeader'
+
+export default function OrderTaking() {
+  const { activeBranch, activeBranchId } = useBranch()
+  const { staff } = useAuth()
+  const navigate = useNavigate()
+  const [tables, setTables] = useState([])
+  const [menuItems, setMenuItems] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [orderType, setOrderType] = useState('dine-in')
+  const [selectedTable, setSelectedTable] = useState(null)
+  const [customerName, setCustomerName] = useState('')
+  const [cart, setCart] = useState([]) // { menu_item_id, name, price, quantity, notes }
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState(null)
+
+  useEffect(() => {
+    if (!activeBranchId) return
+    let active = true
+    setLoading(true)
+    Promise.all([
+      supabase.from('tables').select('*').eq('branch_id', activeBranchId).order('number'),
+      supabase.from('menu_items').select('*').eq('branch_id', activeBranchId).order('sort_order')
+    ]).then(([tablesRes, menuRes]) => {
+      if (!active) return
+      if (!tablesRes.error) setTables(tablesRes.data || [])
+      if (!menuRes.error) setMenuItems(menuRes.data || [])
+      setLoading(false)
+    })
+    return () => { active = false }
+  }, [activeBranchId])
+
+  if (!activeBranch) {
+    return <p className="text-stone-500">Select a branch to take orders.</p>
+  }
+
+  const addToCart = (item) => {
+    setCart((prev) => {
+      const existing = prev.find((c) => c.menu_item_id === item.id)
+      if (existing) return prev.map((c) => c.menu_item_id === item.id ? { ...c, quantity: c.quantity + 1 } : c)
+      return [...prev, { menu_item_id: item.id, name: item.name, price: Number(item.price), quantity: 1, notes: '' }]
+    })
+  }
+
+  const updateQty = (menuItemId, delta) => {
+    setCart((prev) => prev.map((c) => {
+      if (c.menu_item_id !== menuItemId) return c
+      const q = Math.max(0, c.quantity + delta)
+      return { ...c, quantity: q }
+    }).filter((c) => c.quantity > 0))
+  }
+
+  const setNotes = (menuItemId, notes) => {
+    setCart((prev) => prev.map((c) => c.menu_item_id === menuItemId ? { ...c, notes } : c))
+  }
+
+  const total = cart.reduce((s, c) => s + c.price * c.quantity, 0)
+
+  const submitOrder = async () => {
+    if (cart.length === 0) {
+      setError('Add at least one item.')
+      return
+    }
+    if (orderType === 'dine-in' && !selectedTable) {
+      setError('Select a table for dine-in orders.')
+      return
+    }
+    setSubmitting(true)
+    setError(null)
+
+    const { data: order, error: orderError } = await supabase
+      .from('orders')
+      .insert([{
+        branch_id: activeBranchId,
+        table_id: orderType === 'dine-in' ? selectedTable : null,
+        type: orderType,
+        status: 'received',
+        staff_id: staff?.id || null,
+        customer_name: customerName || null
+      }])
+      .select()
+      .single()
+
+    if (orderError) {
+      setError(orderError.message)
+      setSubmitting(false)
+      return
+    }
+
+    const itemsPayload = cart.map((c) => ({
+      order_id: order.id,
+      menu_item_id: c.menu_item_id,
+      name: c.name,
+      quantity: c.quantity,
+      notes: c.notes || null,
+      price_at_order: c.price
+    }))
+    const { error: itemsError } = await supabase.from('order_items').insert(itemsPayload)
+    setSubmitting(false)
+    if (itemsError) {
+      setError(itemsError.message)
+      return
+    }
+
+    if (orderType === 'dine-in') {
+      await supabase.from('tables').update({ status: 'occupied' }).eq('id', selectedTable)
+    }
+
+    // Success → reset cart, navigate to billing to collect payment.
+    setCart([])
+    setCustomerName('')
+    setSelectedTable(null)
+    navigate('/admin/billing', { state: { newOrderId: order.id } })
+  }
+
+  return (
+    <div>
+      <PageHeader
+        title="Order Taking"
+        subtitle={activeBranch ? `Take an order at ${activeBranch.name}` : 'Select a branch'}
+      />
+
+      <div className="grid lg:grid-cols-2 gap-6">
+        {/* Left: pick table / type + menu */}
+        <div className="space-y-6">
+          <div className="bg-white rounded-xl border border-stone-200 p-5">
+            <h2 className="font-semibold text-stone-900 mb-3">Order type</h2>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setOrderType('dine-in')}
+                className={`px-4 py-2 rounded-lg text-sm font-medium border ${orderType === 'dine-in' ? 'bg-brand-600 text-white border-brand-600' : 'bg-white text-stone-600 border-stone-300'}`}
+              >
+                Dine-in
+              </button>
+              <button
+                onClick={() => { setOrderType('takeaway'); setSelectedTable(null) }}
+                className={`px-4 py-2 rounded-lg text-sm font-medium border ${orderType === 'takeaway' ? 'bg-brand-600 text-white border-brand-600' : 'bg-white text-stone-600 border-stone-300'}`}
+              >
+                Takeaway
+              </button>
+            </div>
+
+            {orderType === 'dine-in' && (
+              <>
+                <h3 className="text-sm font-medium text-stone-700 mt-4 mb-2">Select table</h3>
+                <div className="flex flex-wrap gap-2">
+                  {tables.filter((t) => t.status !== 'occupied').map((t) => (
+                    <button
+                      key={t.id}
+                      onClick={() => setSelectedTable(t.id)}
+                      className={`px-3 py-2 rounded-lg border text-sm font-medium ${selectedTable === t.id ? 'bg-brand-600 text-white border-brand-600' : 'bg-white text-stone-700 border-stone-300 hover:border-brand-400'}`}
+                    >
+                      {t.number}
+                    </button>
+                  ))}
+                </div>
+                {tables.filter((t) => t.status === 'occupied').length > 0 && (
+                  <p className="text-xs text-stone-400 mt-2">{tables.filter((t) => t.status === 'occupied').length} table(s) currently occupied and hidden.</p>
+                )}
+              </>
+            )}
+
+            <div className="mt-4">
+              <label className="block text-sm font-medium text-stone-700 mb-1">Customer name (optional)</label>
+              <input
+                value={customerName}
+                onChange={(e) => setCustomerName(e.target.value)}
+                className="w-full px-3 py-2 rounded-lg border border-stone-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                placeholder="Guest"
+              />
+            </div>
+          </div>
+
+          <div className="bg-white rounded-xl border border-stone-200 p-5">
+            <h2 className="font-semibold text-stone-900 mb-3">Menu</h2>
+            {loading ? (
+              <p className="text-stone-500">Loading menu…</p>
+            ) : (
+              <div className="grid sm:grid-cols-2 gap-3 max-h-[60vh] overflow-y-auto pr-1">
+                {menuItems.filter((i) => i.is_available).map((item) => (
+                  <button
+                    key={item.id}
+                    onClick={() => addToCart(item)}
+                    className="text-left p-3 rounded-lg border border-stone-200 hover:border-brand-400 hover:bg-brand-50/50 transition-colors"
+                  >
+                    <div className="flex justify-between items-start gap-2">
+                      <span className="font-medium text-stone-800 text-sm">{item.name}</span>
+                      <span className="text-brand-700 text-sm font-semibold whitespace-nowrap">${Number(item.price).toFixed(2)}</span>
+                    </div>
+                    {item.description && <p className="text-xs text-stone-500 mt-0.5 line-clamp-1">{item.description}</p>}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Right: cart */}
+        <div className="bg-white rounded-xl border border-stone-200 p-5 h-fit lg:sticky lg:top-24">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="font-semibold text-stone-900">Current order</h2>
+            <span className="text-xs font-medium rounded-full bg-stone-100 text-stone-600 px-2.5 py-0.5">{orderType}</span>
+          </div>
+
+          {cart.length === 0 ? (
+            <p className="text-sm text-stone-400 text-center py-8">Tap items on the left to add them.</p>
+          ) : (
+            <ul className="space-y-3 mb-4">
+              {cart.map((c) => (
+                <li key={c.menu_item_id} className="border border-stone-100 rounded-lg p-3">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="font-medium text-sm text-stone-800">{c.name}</span>
+                    <span className="text-sm font-semibold text-stone-900">${(c.price * c.quantity).toFixed(2)}</span>
+                  </div>
+                  <div className="flex items-center gap-2 mb-2">
+                    <button onClick={() => updateQty(c.menu_item_id, -1)} className="w-7 h-7 rounded-md border border-stone-300 text-stone-600 hover:bg-stone-50">−</button>
+                    <span className="w-8 text-center text-sm font-medium">{c.quantity}</span>
+                    <button onClick={() => updateQty(c.menu_item_id, 1)} className="w-7 h-7 rounded-md border border-stone-300 text-stone-600 hover:bg-stone-50">+</button>
+                    <span className="ml-auto text-xs text-stone-400">${c.price.toFixed(2)} each</span>
+                  </div>
+                  <input
+                    value={c.notes}
+                    onChange={(e) => setNotes(c.menu_item_id, e.target.value)}
+                    placeholder="Notes (e.g. no onions)"
+                    className="w-full px-2.5 py-1.5 rounded-md border border-stone-200 text-xs focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  />
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {error && <p className="text-sm text-red-600 mb-3">{error}</p>}
+
+          <div className="flex items-center justify-between border-t border-stone-200 pt-4 mb-4">
+            <span className="font-medium text-stone-700">Total</span>
+            <span className="text-xl font-bold text-stone-900">${total.toFixed(2)}</span>
+          </div>
+
+          <button
+            onClick={submitOrder}
+            disabled={submitting || cart.length === 0}
+            className="w-full py-3 rounded-lg bg-brand-600 text-white font-semibold hover:bg-brand-700 disabled:opacity-50 transition-colors"
+          >
+            {submitting ? 'Sending to kitchen…' : 'Send to kitchen'}
+          </button>
+          <div className="flex items-center justify-between mt-3 text-sm">
+            <Link to="/admin/orders" className="text-brand-600 hover:text-brand-700">View order queue</Link>
+            <button onClick={() => setCart([])} className="text-stone-500 hover:text-stone-700">Clear cart</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}

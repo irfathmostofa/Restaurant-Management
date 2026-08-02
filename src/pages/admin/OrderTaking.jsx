@@ -4,6 +4,10 @@ import supabase from '../../lib/supabase'
 import { useBranch } from '../../context/BranchContext'
 import { useAuth } from '../../context/AuthContext'
 import PageHeader from '../../components/admin/PageHeader'
+import { fetchSettings, DEFAULT_SETTINGS } from '../../lib/config'
+import { buildKotHtml, openPrintWindow, printHtml } from '../../lib/printing'
+import { hasKitchenItems } from '../../lib/kitchen'
+import useOrderReadyNotifications from '../../hooks/useOrderReadyNotifications'
 
 export default function OrderTaking() {
   const { activeBranch, activeBranchId } = useBranch()
@@ -15,9 +19,10 @@ export default function OrderTaking() {
   const [orderType, setOrderType] = useState('dine-in')
   const [selectedTable, setSelectedTable] = useState(null)
   const [customerName, setCustomerName] = useState('')
-  const [cart, setCart] = useState([]) // { menu_item_id, name, price, quantity, notes }
+  const [cart, setCart] = useState([]) // { menu_item_id, name, price, quantity, notes, requires_kitchen }
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState(null)
+  const { notifications, dismiss } = useOrderReadyNotifications(activeBranchId)
 
   useEffect(() => {
     if (!activeBranchId) return
@@ -43,7 +48,14 @@ export default function OrderTaking() {
     setCart((prev) => {
       const existing = prev.find((c) => c.menu_item_id === item.id)
       if (existing) return prev.map((c) => c.menu_item_id === item.id ? { ...c, quantity: c.quantity + 1 } : c)
-      return [...prev, { menu_item_id: item.id, name: item.name, price: Number(item.price), quantity: 1, notes: '' }]
+      return [{
+        menu_item_id: item.id,
+        name: item.name,
+        price: Number(item.price),
+        quantity: 1,
+        notes: '',
+        requires_kitchen: item.requires_kitchen !== false
+      }, ...prev]
     })
   }
 
@@ -60,6 +72,7 @@ export default function OrderTaking() {
   }
 
   const total = cart.reduce((s, c) => s + c.price * c.quantity, 0)
+  const hasKitchenInCart = hasKitchenItems(cart)
 
   const submitOrder = async () => {
     if (cart.length === 0) {
@@ -73,13 +86,17 @@ export default function OrderTaking() {
     setSubmitting(true)
     setError(null)
 
+    // Open the KOT print window synchronously so popup blockers don't block it.
+    const kotWin = hasKitchenInCart ? openPrintWindow() : null
+
     const { data: order, error: orderError } = await supabase
       .from('orders')
       .insert([{
         branch_id: activeBranchId,
         table_id: orderType === 'dine-in' ? selectedTable : null,
         type: orderType,
-        status: 'received',
+        // Orders with only non-kitchen items are ready immediately.
+        status: hasKitchenInCart ? 'received' : 'ready',
         staff_id: staff?.id || null,
         customer_name: customerName || null
       }])
@@ -87,22 +104,32 @@ export default function OrderTaking() {
       .single()
 
     if (orderError) {
+      if (kotWin) kotWin.close()
       setError(orderError.message)
       setSubmitting(false)
       return
     }
 
+    const settings = await fetchSettings()
+    const defaultPrepTime = settings.default_prep_time || DEFAULT_SETTINGS.default_prep_time
+
     const itemsPayload = cart.map((c) => ({
       order_id: order.id,
+      branch_id: activeBranchId,
       menu_item_id: c.menu_item_id,
       name: c.name,
       quantity: c.quantity,
       notes: c.notes || null,
-      price_at_order: c.price
+      price_at_order: c.price,
+      requires_kitchen: c.requires_kitchen,
+      // Kitchen-required items queue for the kitchen; the rest are ready now.
+      kitchen_status: c.requires_kitchen ? 'pending' : 'ready',
+      estimated_prep_time: c.requires_kitchen ? (Number(defaultPrepTime) || 5) : 0
     }))
     const { error: itemsError } = await supabase.from('order_items').insert(itemsPayload)
-    setSubmitting(false)
     if (itemsError) {
+      if (kotWin) kotWin.close()
+      setSubmitting(false)
       setError(itemsError.message)
       return
     }
@@ -111,6 +138,26 @@ export default function OrderTaking() {
       await supabase.from('tables').update({ status: 'occupied' }).eq('id', selectedTable)
     }
 
+    // Print the kitchen ticket (kitchen-required items only, no prices).
+    if (kotWin) {
+      const kitchenItems = cart.filter((c) => c.requires_kitchen)
+      const tableNumber = orderType === 'dine-in'
+        ? tables.find((t) => t.id === selectedTable)?.number
+        : null
+      const html = buildKotHtml({
+        restaurantName: settings.restaurant_name || DEFAULT_SETTINGS.restaurant_name,
+        branch: activeBranch,
+        orderNo: order.id.slice(0, 8).toUpperCase(),
+        tableNumber,
+        waiterName: staff?.name || '',
+        items: kitchenItems,
+        defaultPrepTime,
+        printTime: new Date().toISOString()
+      })
+      printHtml(kotWin, html)
+    }
+
+    setSubmitting(false)
     // Success → reset cart, navigate to billing to collect payment.
     setCart([])
     setCustomerName('')
@@ -124,6 +171,17 @@ export default function OrderTaking() {
         title="Order Taking"
         subtitle={activeBranch ? `Take an order at ${activeBranch.name}` : 'Select a branch'}
       />
+
+      {notifications.length > 0 && (
+        <div className="mb-5 space-y-2">
+          {notifications.map((n) => (
+            <div key={n.id} className="flex items-center justify-between bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-lg px-4 py-3 text-sm">
+              <span>Order <b>#{n.shortId}</b> is ready to serve.</span>
+              <button onClick={() => dismiss(n.id)} className="ml-4 text-emerald-700 font-medium hover:underline">Dismiss</button>
+            </div>
+          ))}
+        </div>
+      )}
 
       <div className="grid lg:grid-cols-2 gap-6">
         {/* Left: pick table / type + menu */}
@@ -192,7 +250,12 @@ export default function OrderTaking() {
                       <span className="font-medium text-stone-800 text-sm">{item.name}</span>
                       <span className="text-brand-700 text-sm font-semibold whitespace-nowrap">${Number(item.price).toFixed(2)}</span>
                     </div>
-                    {item.description && <p className="text-xs text-stone-500 mt-0.5 line-clamp-1">{item.description}</p>}
+                    <div className="flex items-center gap-2 mt-1">
+                      {item.description && <p className="text-xs text-stone-500 line-clamp-1">{item.description}</p>}
+                      <span className={`shrink-0 text-[10px] font-medium rounded px-1.5 py-0.5 ${item.requires_kitchen !== false ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                        {item.requires_kitchen !== false ? 'Kitchen' : 'Ready'}
+                      </span>
+                    </div>
                   </button>
                 ))}
               </div>
@@ -246,7 +309,7 @@ export default function OrderTaking() {
             disabled={submitting || cart.length === 0}
             className="w-full py-3 rounded-lg bg-brand-600 text-white font-semibold hover:bg-brand-700 disabled:opacity-50 transition-colors"
           >
-            {submitting ? 'Sending to kitchen…' : 'Send to kitchen'}
+            {submitting ? 'Placing order…' : (hasKitchenInCart ? 'Send to kitchen' : 'Place order')}
           </button>
           <div className="flex items-center justify-between mt-3 text-sm">
             <Link to="/admin/orders" className="text-brand-600 hover:text-brand-700">View order queue</Link>

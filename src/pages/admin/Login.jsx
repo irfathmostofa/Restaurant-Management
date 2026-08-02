@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useLocation, useNavigate, Link } from 'react-router-dom'
 import supabase from '../../lib/supabase'
+import { fetchDefaultRoute } from '../../lib/config'
 
 export default function Login() {
   const [email, setEmail] = useState('')
@@ -16,13 +17,23 @@ export default function Login() {
     setLoading(true)
     setError(null)
     const { data, error } = await supabase.auth.signInWithPassword({ email, password })
-    setLoading(false)
     if (error) {
+      setLoading(false)
       setError(error.message)
       return
     }
     if (data.user) {
-      navigate(from, { replace: true })
+      // Resolve the landing page for the signed-in user's role. The default
+      // fallback (`/admin/dashboard`) is only used when the user was deep
+      // linked to a specific page; otherwise we honour the configurable
+      // per-role route stored in role_default_routes.
+      let dest = from
+      if (from === '/admin/dashboard') {
+        const { data: staffRow } = await supabase.from('staff').select('role').eq('user_id', data.user.id).maybeSingle()
+        dest = await fetchDefaultRoute(staffRow?.role)
+      }
+      setLoading(false)
+      navigate(dest, { replace: true })
     }
   }
 

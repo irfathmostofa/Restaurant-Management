@@ -16,6 +16,9 @@ import Orders from './pages/admin/Orders'
 import Reports from './pages/admin/Reports'
 import OrderTaking from './pages/admin/OrderTaking'
 import Billing from './pages/admin/Billing'
+import PaymentMethods from './pages/admin/PaymentMethods'
+import Settings from './pages/admin/Settings'
+import RoleHome from './components/RoleHome'
 
 export default function App() {
   return (
@@ -31,7 +34,7 @@ export default function App() {
         <Route path="/admin" element={<AdminRoute />}>
           <Route element={<BranchProvider />}>
             <Route element={<AdminShell />}>
-              <Route index element={<Navigate to="/admin/dashboard" replace />} />
+              <Route index element={<RoleHome />} />
               <Route path="dashboard" element={<Dashboard />} />
               <Route path="branches" element={<Branches />} />
               <Route path="menu" element={<Menu />} />
@@ -42,6 +45,8 @@ export default function App() {
               <Route path="reports" element={<Reports />} />
               <Route path="order-taking" element={<OrderTaking />} />
               <Route path="billing" element={<Billing />} />
+              <Route path="payment-methods" element={<PaymentMethods />} />
+              <Route path="settings" element={<Settings />} />
             </Route>
           </Route>
         </Route>

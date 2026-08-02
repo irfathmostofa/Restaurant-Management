@@ -5,7 +5,7 @@ import PageHeader from '../../components/admin/PageHeader'
 import Modal from '../../components/admin/Modal'
 import EmptyState from '../../components/admin/EmptyState'
 
-const emptyItem = { name: '', description: '', price: '', category_id: '', photo_url: '', is_available: true, sort_order: 0 }
+const emptyItem = { name: '', description: '', price: '', category_id: '', photo_url: '', is_available: true, requires_kitchen: true, sort_order: 0 }
 const emptyCat = { name: '', sort_order: 0 }
 
 export default function Menu() {
@@ -141,9 +141,10 @@ export default function Menu() {
                   <thead>
                     <tr className="text-left text-stone-500 border-b border-stone-100">
                       <th className="px-5 py-2 font-medium">Item</th>
-                      <th className="px-5 py-2 font-medium">Price</th>
-                      <th className="px-5 py-2 font-medium">Availability</th>
-                      <th className="px-5 py-2 font-medium text-right">Actions</th>
+                    <th className="px-5 py-2 font-medium">Price</th>
+                    <th className="px-5 py-2 font-medium">Kitchen</th>
+                    <th className="px-5 py-2 font-medium">Availability</th>
+                    <th className="px-5 py-2 font-medium text-right">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -154,6 +155,11 @@ export default function Menu() {
                           {item.description && <div className="text-xs text-stone-500 max-w-md truncate">{item.description}</div>}
                         </td>
                         <td className="px-5 py-3 text-stone-700">${Number(item.price).toFixed(2)}</td>
+                        <td className="px-5 py-3">
+                          <span className={`text-xs font-medium rounded-full px-2.5 py-0.5 ${item.requires_kitchen !== false ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                            {item.requires_kitchen !== false ? 'Kitchen' : 'Ready'}
+                          </span>
+                        </td>
                         <td className="px-5 py-3">
                           <button
                             onClick={() => toggleAvailability(item)}
@@ -206,6 +212,10 @@ export default function Menu() {
           <label className="flex items-center gap-2 text-sm text-stone-700">
             <input type="checkbox" checked={itemForm.is_available} onChange={(e) => setItemForm({ ...itemForm, is_available: e.target.checked })} className="rounded" />
             Available
+          </label>
+          <label className="flex items-center gap-2 text-sm text-stone-700">
+            <input type="checkbox" checked={itemForm.requires_kitchen !== false} onChange={(e) => setItemForm({ ...itemForm, requires_kitchen: e.target.checked })} className="rounded" />
+            Requires kitchen (sent to kitchen queue)
           </label>
           {error && <p className="text-sm text-red-600">{error}</p>}
           <div className="flex justify-end gap-3 pt-2">

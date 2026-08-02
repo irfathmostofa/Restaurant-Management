@@ -1,7 +1,9 @@
 import { NavLink, useNavigate, Outlet } from 'react-router-dom'
+import { useEffect, useState } from 'react'
 import { useAuth } from '../../context/AuthContext'
 import { useBranch } from '../../context/BranchContext'
 import { NAV_BY_ROLE, ROLE_LABELS, DEFAULT_ROUTE_BY_ROLE } from '../../lib/roles'
+import { fetchDefaultRoute } from '../../lib/config'
 import Icon from '../Icon'
 import supabase from '../../lib/supabase'
 
@@ -9,6 +11,16 @@ export default function AdminShell() {
   const { staff, session } = useAuth()
   const { branches, activeBranch, activeBranchId, setActiveBranchId, canSwitchBranches } = useBranch()
   const navigate = useNavigate()
+  const [homeRoute, setHomeRoute] = useState(DEFAULT_ROUTE_BY_ROLE[staff?.role] || '/admin/dashboard')
+
+  useEffect(() => {
+    if (!staff?.role) return
+    let active = true
+    fetchDefaultRoute(staff.role).then((r) => {
+      if (active) setHomeRoute(r)
+    })
+    return () => { active = false }
+  }, [staff?.role])
 
   if (!staff || !session) return null
 
@@ -18,6 +30,11 @@ export default function AdminShell() {
     await supabase.auth.signOut()
     navigate('/')
   }
+
+  const homeLabel = homeRoute.includes('order-taking') ? 'Order Screen'
+    : homeRoute.includes('billing') ? 'POS / Billing'
+      : homeRoute.includes('orders') ? 'Kitchen Display'
+        : 'Dashboard'
 
   return (
     <div className="min-h-screen bg-stone-100 flex">
@@ -70,8 +87,8 @@ export default function AdminShell() {
       <div className="flex-1 ml-60 flex flex-col min-w-0">
         <header className="sticky top-0 z-20 bg-white border-b border-stone-200 px-6 py-3 flex items-center justify-between gap-4">
           <div className="flex items-center gap-2 text-sm text-stone-500">
-            <button onClick={() => navigate(DEFAULT_ROUTE_BY_ROLE[staff.role] || '/admin/dashboard')} className="hover:text-brand-600">
-              {DEFAULT_ROUTE_BY_ROLE[staff.role]?.includes('order-taking') ? 'Order Taking' : 'Dashboard'}
+            <button onClick={() => navigate(homeRoute)} className="hover:text-brand-600">
+              {homeLabel}
             </button>
           </div>
           {canSwitchBranches && (

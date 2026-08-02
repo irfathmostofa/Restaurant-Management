@@ -24,8 +24,11 @@ cp .env.example .env
 # fill in VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY
 
 # Create the database
+
 # 1. Open Supabase Dashboard -> SQL Editor
-# 2. Run the whole file: supabase/schema.sql
+# 2. Run the whole file: supabase/schema.sql  (fresh install)
+# 3. Already deployed? Instead of schema.sql, run the incremental migrations
+#    in supabase/migrations/ in order (001 -> 005).
 
 npm run dev
 ```
@@ -33,6 +36,34 @@ npm run dev
 The schema file creates all tables, RLS policies, helper functions and seeds a demo
 branch with sample categories, menu items and tables. See `.env.example` for
 bootstrap instructions (including how to create your first owner account).
+
+## V1.1 features
+
+- **Role-based login redirect** — after sign-in every role lands on its own
+  configurable screen (Owner/Admin → Dashboard, Manager → Dashboard, Cashier →
+  POS/Billing, Waiter → Order Screen, Kitchen → Kitchen Display). The routes are
+  stored in `role_default_routes` and editable in `Admin → Settings` without
+  touching app code.
+- **Kitchen required products** — `menu_items.requires_kitchen` marks items that
+  need kitchen prep. Kitchen items flow into the Kitchen Display; non-kitchen
+  items are marked ready immediately. Mixed orders send only kitchen items to
+  the kitchen.
+- **Kitchen Display with ETA** — kitchen tickets show order, table, customer,
+  items and an estimated prep time (default 5 minutes) with `Start Preparing`,
+  `+1/+2/+5` and `Ready` controls. ETA changes push to the POS in real time.
+- **Branch-wise payment methods** — `payment_methods` + `branch_payment_methods`
+  let every branch choose which methods its cashiers can accept (Cash, Card,
+  bKash, Nagad, Rocket, Bank Transfer, QR, UPI…). Configured in
+  `Admin → Payment Methods`; the POS payment screen loads them dynamically.
+- **Customer invoice printing** — after payment, a thermal-receipt invoice
+  (58mm/80mm) prints automatically with restaurant/branch info, invoice & order
+  number, cashier, table, customer, items, discount, VAT, totals, payment
+  method, paid/change and a thank-you footer. Paid orders can be reprinted.
+- **Kitchen Order Ticket (KOT)** — printed immediately when an order is placed
+  (before payment). Contains kitchen-required items only (no prices/totals),
+  table, waiter, order time, notes and estimated prep time.
+- **Realtime everywhere** — kitchen status, ETA changes, order-ready
+  notifications and payment status all stream via Supabase Realtime.
 
 ## Architecture
 
@@ -62,13 +93,16 @@ Single-page-feel storefront in this vertical order:
 
 | Role    | Nav / access                                                        | Default landing          |
 |---------|---------------------------------------------------------------------|--------------------------|
-| owner   | Full nav: dashboard, branches, menu, tables, reservations, staff, orders, reports, order-taking | `/admin/dashboard` |
+| owner   | Full nav: dashboard, branches, menu, tables, reservations, staff, orders, reports, order-taking, payment methods, settings | `/admin/dashboard` |
 | admin   | Same as owner                                                        | `/admin/dashboard` |
-| manager | Menu, tables, reservations, orders, reports, order-taking (scoped to their branch) | `/admin/dashboard` |
+| manager | Menu, tables, reservations, orders, reports, order-taking, payment methods (scoped to their branch) | `/admin/dashboard` |
 | waiter  | Order Taking + Billing (scoped to their branch)                      | `/admin/order-taking` |
+| cashier | POS/Billing + Order Taking (scoped to their branch)                  | `/admin/billing` |
 | kitchen | Order Queue (status updates only, scoped to their branch)            | `/admin/orders` |
 
 Owner/admin see a **branch switcher**; other staff are locked to their `branch_id`.
+Default landing pages are configurable in `Admin → Settings` (stored in the
+`role_default_routes` table).
 
 ### Modules
 
@@ -82,8 +116,14 @@ Owner/admin see a **branch switcher**; other staff are locked to their `branch_i
 - **Sales reports** — per-branch or consolidated, daily/weekly/monthly/annual
   revenue + best sellers
 - **Order Taking** — pick table (dine-in) or takeaway, add items with qty/notes,
-  send to kitchen, track `received → preparing → ready → served`, then bill
-- **Billing** — charge open orders (cash/card/upi/qr), frees the table on payment
+  send to kitchen, track `received → preparing → ready → served`, then bill.
+  Kitchen-required items queue for the kitchen; non-kitchen items (e.g. water)
+  are marked ready immediately. A kitchen ticket (KOT) prints automatically for
+  kitchen items when the order is placed.
+- **Billing** — charge open orders with the payment methods enabled for the
+  branch (Cash/Card/bKash/Nagad/Rocket/Bank Transfer/QR/UPI), optional discount
+  and VAT, cash received/change, frees the table on payment, and prints a
+  customer invoice automatically.
 
 ### Database & RLS
 
@@ -102,6 +142,27 @@ Every branch-scoped table carries `branch_id`. RLS policies:
 
 - Order status, new orders, table status, and reservations update live through
   Supabase Realtime channels (one channel per active branch).
+- Kitchen status, ETA changes, order-ready notifications and payment status also
+  stream through Realtime (`orders`, `order_items`, `payments`, `tables` are all
+  added to the `supabase_realtime` publication by the schema/migrations).
+
+## Printers
+
+- Customer invoices and kitchen tickets are rendered as self-contained receipt
+  HTML sized for 58mm or 80mm thermal printers (see `src/lib/printing.js`).
+- The browser print dialog opens automatically (popup-safe: the print window is
+  opened synchronously from the click that submits the order/payment).
+
+## Migrations
+
+For deployments created with the V1 schema, run the files in
+`supabase/migrations/` in order instead of re-running `schema.sql`:
+
+1. `001_kitchen_products.sql` — `requires_kitchen` + per-item kitchen tracking
+2. `002_payment_methods.sql` — payment methods + branch config + payments FK
+3. `003_payments_invoice_fields.sql` — invoice fields + `cashier` role
+4. `004_role_routes_and_settings.sql` — configurable landing routes + settings
+5. `005_realtime.sql` — add tables to the realtime publication
 
 ## Out of scope (V1)
 

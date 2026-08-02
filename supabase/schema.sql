@@ -7,6 +7,10 @@ create table if not exists public.branches (
   name text not null,
   address text,
   contact_info text,
+  description text,
+  opening_hours text,
+  map_link text,
+  image_url text,
   is_active boolean not null default true,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -19,6 +23,10 @@ create table if not exists public.staff (
   email text not null unique,
   role text not null check (role in ('owner', 'admin', 'manager', 'waiter', 'kitchen', 'cashier')),
   branch_id uuid references public.branches(id) on delete set null,
+  phone text,
+  address text,
+  profile_image_url text,
+  last_login_at timestamptz,
   active boolean not null default true,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -41,6 +49,7 @@ create table if not exists public.menu_items (
   price numeric(10,2) not null default 0 check (price >= 0),
   photo_url text,
   is_available boolean not null default true,
+  is_featured boolean not null default false,
   requires_kitchen boolean not null default true,
   sort_order int not null default 0,
   created_at timestamptz not null default now()
@@ -77,6 +86,8 @@ create table if not exists public.orders (
   status text not null default 'received' check (status in ('received', 'preparing', 'ready', 'served', 'paid', 'cancelled')),
   staff_id uuid references public.staff(id) on delete set null,
   customer_name text,
+  discount numeric(10,2) not null default 0 check (discount >= 0),
+  notes text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -127,7 +138,9 @@ create table if not exists public.payments (
   invoice_no text,
   subtotal numeric(10,2) not null default 0 check (subtotal >= 0),
   discount numeric(10,2) not null default 0 check (discount >= 0),
+  vat numeric(10,2) not null default 0 check (vat >= 0),
   tax numeric(10,2) not null default 0 check (tax >= 0),
+  service_charge numeric(10,2) not null default 0 check (service_charge >= 0),
   paid_amount numeric(10,2) not null default 0 check (paid_amount >= 0),
   change_amount numeric(10,2) not null default 0 check (change_amount >= 0),
   cashier_id uuid references public.staff(id) on delete set null,
@@ -145,6 +158,85 @@ create table if not exists public.role_default_routes (
 create table if not exists public.settings (
   key text primary key,
   value text,
+  updated_at timestamptz not null default now()
+);
+
+-- Expense categories (rent, electricity, ...) + branch-scoped expenses.
+create table if not exists public.expense_categories (
+  id uuid primary key default gen_random_uuid(),
+  name text not null unique,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists public.expenses (
+  id uuid primary key default gen_random_uuid(),
+  branch_id uuid not null references public.branches(id) on delete cascade,
+  category_id uuid references public.expense_categories(id) on delete set null,
+  title text not null,
+  description text,
+  amount numeric(12,2) not null check (amount >= 0),
+  expense_date date not null default current_date,
+  created_by uuid references public.staff(id) on delete set null,
+  attachment_url text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+-- Centralized activity / audit log (purged after 7 days by pg_cron).
+create table if not exists public.activity_logs (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid references auth.users(id) on delete set null,
+  staff_id uuid references public.staff(id) on delete set null,
+  user_name text,
+  role text,
+  branch_id uuid references public.branches(id) on delete set null,
+  module text not null,
+  action text not null,
+  description text,
+  metadata jsonb,
+  ip_address text,
+  device_info text,
+  created_at timestamptz not null default now()
+);
+
+-- Global tax / VAT configuration (single row) + per-branch overrides.
+create table if not exists public.tax_settings (
+  id uuid primary key default gen_random_uuid(),
+  is_vat_enabled boolean not null default false,
+  vat_name text not null default 'VAT',
+  vat_rate numeric(5,2) not null default 0 check (vat_rate >= 0),
+  is_tax_enabled boolean not null default false,
+  tax_name text not null default 'Tax',
+  tax_rate numeric(5,2) not null default 0 check (tax_rate >= 0),
+  service_charge_enabled boolean not null default false,
+  service_charge_rate numeric(5,2) not null default 0 check (service_charge_rate >= 0),
+  price_includes_tax boolean not null default false,
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.branch_tax_settings (
+  branch_id uuid primary key references public.branches(id) on delete cascade,
+  is_vat_enabled boolean,
+  vat_name text,
+  vat_rate numeric(5,2),
+  is_tax_enabled boolean,
+  tax_name text,
+  tax_rate numeric(5,2),
+  service_charge_enabled boolean,
+  service_charge_rate numeric(5,2),
+  price_includes_tax boolean,
+  updated_at timestamptz not null default now()
+);
+
+-- Dynamic currency configuration (single row).
+create table if not exists public.currency_settings (
+  id uuid primary key default gen_random_uuid(),
+  name text not null default 'US Dollar',
+  iso_code text not null default 'USD',
+  symbol text not null default '$',
+  symbol_position text not null default 'before' check (symbol_position in ('before', 'after')),
+  decimal_precision int not null default 2 check (decimal_precision between 0 and 4),
+  thousand_separator text not null default ',',
   updated_at timestamptz not null default now()
 );
 
@@ -175,6 +267,22 @@ for each row execute function public.set_updated_at();
 
 drop trigger if exists settings_updated_at on public.settings;
 create trigger settings_updated_at before update on public.settings
+for each row execute function public.set_updated_at();
+
+drop trigger if exists expenses_updated_at on public.expenses;
+create trigger expenses_updated_at before update on public.expenses
+for each row execute function public.set_updated_at();
+
+drop trigger if exists tax_settings_updated_at on public.tax_settings;
+create trigger tax_settings_updated_at before update on public.tax_settings
+for each row execute function public.set_updated_at();
+
+drop trigger if exists branch_tax_settings_updated_at on public.branch_tax_settings;
+create trigger branch_tax_settings_updated_at before update on public.branch_tax_settings
+for each row execute function public.set_updated_at();
+
+drop trigger if exists currency_settings_updated_at on public.currency_settings;
+create trigger currency_settings_updated_at before update on public.currency_settings
 for each row execute function public.set_updated_at();
 
 -- ---------- Helper: current staff profile (role-aware) ----------
@@ -379,6 +487,224 @@ create trigger branches_seed_payment_methods
 after insert on public.branches
 for each row execute function public.seed_branch_payment_methods();
 
+-- ---------- Audit writer (SECURITY DEFINER, callable by any role) ----------
+create or replace function public.log_activity(
+  p_module text,
+  p_action text,
+  p_description text default null,
+  p_branch_id uuid default null,
+  p_metadata jsonb default null
+)
+returns uuid
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  v_staff public.staff;
+  v_user_id uuid;
+  v_headers text;
+  v_ip text;
+  v_device text;
+  v_id uuid;
+begin
+  v_user_id := auth.uid();
+  v_staff := public.current_staff();
+  begin
+    v_headers := current_setting('request.headers', true);
+    if v_headers is not null then
+      if v_headers like '%x-forwarded-for=%' then
+        v_ip := btrim(split_part(split_part(v_headers, 'x-forwarded-for=', 2), ',', 1), '{} ');
+      end if;
+      if v_headers like '%user-agent=%' then
+        v_device := btrim(split_part(v_headers, 'user-agent=', 2), '{}');
+      end if;
+    end if;
+  exception when others then
+    v_headers := null;
+  end;
+
+  insert into public.activity_logs
+    (user_id, staff_id, user_name, role, branch_id, module, action, description, metadata, ip_address, device_info)
+  values
+    (v_user_id, v_staff.id, v_staff.name, v_staff.role,
+     coalesce(p_branch_id, v_staff.branch_id),
+     p_module, p_action, p_description, p_metadata,
+     left(v_ip, 45), left(v_device, 255))
+  returning id into v_id;
+
+  return v_id;
+end;
+$$;
+
+-- ---------- Activity log cleanup ----------
+create or replace function public.cleanup_activity_logs()
+returns void
+language sql security definer
+set search_path = public
+as $$
+  delete from public.activity_logs
+  where created_at < now() - interval '7 days';
+$$;
+
+-- ---------- Effective tax settings for a branch (global + override merge) ----------
+create or replace function public.effective_tax_settings(branch uuid)
+returns public.tax_settings
+language plpgsql stable security definer
+set search_path = public
+as $$
+declare
+  g public.tax_settings;
+  b public.branch_tax_settings;
+begin
+  select * into g from public.tax_settings limit 1;
+  if g is null then
+    insert into public.tax_settings default values returning * into g;
+  end if;
+
+  select * into b from public.branch_tax_settings where branch_id = branch;
+  if b is null then
+    return g;
+  end if;
+
+  return row(
+    g.id,
+    coalesce(b.is_vat_enabled, g.is_vat_enabled),
+    coalesce(b.vat_name, g.vat_name),
+    coalesce(b.vat_rate, g.vat_rate),
+    coalesce(b.is_tax_enabled, g.is_tax_enabled),
+    coalesce(b.tax_name, g.tax_name),
+    coalesce(b.tax_rate, g.tax_rate),
+    coalesce(b.service_charge_enabled, g.service_charge_enabled),
+    coalesce(b.service_charge_rate, g.service_charge_rate),
+    coalesce(b.price_includes_tax, g.price_includes_tax),
+    now()
+  )::public.tax_settings;
+end;
+$$;
+
+-- ---------- Staff password reset (owner/admin: any staff; manager: own branch) ----------
+create or replace function public.admin_reset_password(target_user_id uuid, new_password text)
+returns boolean
+language plpgsql security definer
+set search_path = public, auth
+as $$
+declare
+  v_role text;
+  v_ok boolean;
+begin
+  if new_password is null or length(new_password) < 6 then
+    raise exception 'Password must be at least 6 characters.';
+  end if;
+
+  v_role := (select role from public.current_staff());
+  if v_role in ('owner', 'admin') then
+    v_ok := exists (select 1 from public.staff s where s.user_id = target_user_id);
+  elsif v_role = 'manager' then
+    v_ok := exists (
+      select 1 from public.staff s
+      where s.user_id = target_user_id
+        and s.branch_id = public.branch_scope()
+        and s.role not in ('owner', 'admin')
+    );
+  else
+    v_ok := false;
+  end if;
+
+  if not v_ok then
+    raise exception 'You are not authorized to reset this password.';
+  end if;
+
+  update auth.users
+  set encrypted_password = crypt(new_password, gen_salt('bf')),
+      updated_at = now()
+  where id = target_user_id;
+
+  return found;
+end;
+$$;
+
+-- ---------- Last-login tracking ----------
+create or replace function public.sync_staff_last_login()
+returns trigger
+language plpgsql security definer
+set search_path = public
+as $$
+begin
+  if new.last_sign_in_at is distinct from old.last_sign_in_at then
+    update public.staff
+    set last_login_at = new.last_sign_in_at
+    where user_id = new.id;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists sync_staff_last_login on auth.users;
+create trigger sync_staff_last_login
+after update of last_sign_in_at on auth.users
+for each row execute function public.sync_staff_last_login();
+
+-- ---------- Privilege guard for staff rows ----------
+create or replace function public.protect_staff_privileges()
+returns trigger
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  v_role text;
+begin
+  v_role := (select role from public.current_staff());
+
+  if v_role in ('owner', 'admin') then
+    return new;
+  end if;
+
+  if old.user_id = auth.uid() then
+    if new.role is distinct from old.role
+       or new.branch_id is distinct from old.branch_id
+       or new.active is distinct from old.active
+       or new.user_id is distinct from old.user_id
+       or new.email is distinct from old.email then
+      new.role := old.role;
+      new.branch_id := old.branch_id;
+      new.active := old.active;
+      new.user_id := old.user_id;
+      new.email := old.email;
+    end if;
+    return new;
+  end if;
+
+  if v_role = 'manager' then
+    if TG_OP = 'INSERT' then
+      if new.branch_id is distinct from public.branch_scope() then
+        raise exception 'Managers can only assign staff to their own branch.';
+      end if;
+      if new.role in ('owner', 'admin') then
+        raise exception 'Managers cannot create owner or admin accounts.';
+      end if;
+      return new;
+    end if;
+    if old.branch_id is distinct from public.branch_scope() then
+      raise exception 'Managers can only manage staff in their own branch.';
+    end if;
+    if new.branch_id is distinct from old.branch_id then
+      raise exception 'Managers cannot change staff branch assignments.';
+    end if;
+    if new.role in ('owner', 'admin') or old.role in ('owner', 'admin') then
+      raise exception 'Managers cannot manage owner or admin accounts.';
+    end if;
+    return new;
+  end if;
+
+  raise exception 'You do not have permission to modify this staff account.';
+end;
+$$;
+
+drop trigger if exists protect_staff_privileges on public.staff;
+create trigger protect_staff_privileges
+before insert or update on public.staff
+for each row execute function public.protect_staff_privileges();
+
 -- ============================================================
 -- RLS
 -- ============================================================
@@ -395,6 +721,12 @@ alter table public.payment_methods enable row level security;
 alter table public.branch_payment_methods enable row level security;
 alter table public.role_default_routes enable row level security;
 alter table public.settings enable row level security;
+alter table public.expense_categories enable row level security;
+alter table public.expenses enable row level security;
+alter table public.activity_logs enable row level security;
+alter table public.tax_settings enable row level security;
+alter table public.branch_tax_settings enable row level security;
+alter table public.currency_settings enable row level security;
 
 -- ---------- Branches: active branches public, all branches for staff ----------
 drop policy if exists branches_public_read on public.branches;
@@ -420,13 +752,28 @@ create policy staff_read_branch on public.staff
 
 drop policy if exists staff_write_owner on public.staff;
 create policy staff_write_owner on public.staff
+  for all using (public.is_owner())
+  with check (public.is_owner());
+
+-- Managers: manage staff in their own branch only. They may never target
+-- owner/admin accounts and can never move a staff member to another branch.
+drop policy if exists staff_write_manager on public.staff;
+create policy staff_write_manager on public.staff
   for all using (
-    public.is_owner() or user_id = auth.uid()
+    (select role from public.current_staff()) = 'manager'
+    and branch_id = public.branch_scope()
   )
   with check (
-    public.is_owner()
-    or (user_id = auth.uid() and role in ('waiter', 'kitchen', 'cashier'))
+    (select role from public.current_staff()) = 'manager'
+    and branch_id = public.branch_scope()
+    and new.role not in ('owner', 'admin')
   );
+
+-- Self service: every staff member may update their own profile row.
+drop policy if exists staff_write_self on public.staff;
+create policy staff_write_self on public.staff
+  for update using (user_id = auth.uid())
+  with check (user_id = auth.uid());
 
 -- ---------- Categories (branch scoped) ----------
 drop policy if exists categories_read on public.categories;
@@ -627,6 +974,74 @@ create policy settings_write on public.settings
   for all using (public.is_owner())
   with check (public.is_owner());
 
+-- ---------- Expense categories (reference data, staff read) ----------
+drop policy if exists expense_categories_read on public.expense_categories;
+create policy expense_categories_read on public.expense_categories
+  for select using (public.current_staff() is not null);
+
+drop policy if exists expense_categories_write on public.expense_categories;
+create policy expense_categories_write on public.expense_categories
+  for all using (public.is_owner())
+  with check (public.is_owner());
+
+-- ---------- Expenses (branch scoped) ----------
+drop policy if exists expenses_read on public.expenses;
+create policy expenses_read on public.expenses
+  for select using (
+    public.is_owner()
+    or branch_id = public.branch_scope()
+  );
+
+drop policy if exists expenses_write on public.expenses;
+create policy expenses_write on public.expenses
+  for all using (
+    public.is_owner()
+    or branch_id = public.branch_scope()
+  )
+  with check (
+    public.is_owner()
+    or branch_id = public.branch_scope()
+  );
+
+-- ---------- Activity logs (owner/admin read; writes via log_activity) ----------
+drop policy if exists activity_logs_read on public.activity_logs;
+create policy activity_logs_read on public.activity_logs
+  for select using (public.is_owner());
+
+drop policy if exists activity_logs_write on public.activity_logs;
+create policy activity_logs_write on public.activity_logs
+  for all using (public.is_owner())
+  with check (public.is_owner());
+
+-- ---------- Tax settings (staff read, owner/admin write) ----------
+drop policy if exists tax_settings_read on public.tax_settings;
+create policy tax_settings_read on public.tax_settings
+  for select using (public.current_staff() is not null);
+
+drop policy if exists tax_settings_write on public.tax_settings;
+create policy tax_settings_write on public.tax_settings
+  for all using (public.is_owner())
+  with check (public.is_owner());
+
+drop policy if exists branch_tax_settings_read on public.branch_tax_settings;
+create policy branch_tax_settings_read on public.branch_tax_settings
+  for select using (public.branch_accessible(branch_id));
+
+drop policy if exists branch_tax_settings_write on public.branch_tax_settings;
+create policy branch_tax_settings_write on public.branch_tax_settings
+  for all using (public.is_owner())
+  with check (public.is_owner());
+
+-- ---------- Currency settings (public read, owner/admin write) ----------
+drop policy if exists currency_settings_read on public.currency_settings;
+create policy currency_settings_read on public.currency_settings
+  for select using (true);
+
+drop policy if exists currency_settings_write on public.currency_settings;
+create policy currency_settings_write on public.currency_settings
+  for all using (public.is_owner())
+  with check (public.is_owner());
+
 -- ============================================================
 -- REALTIME
 -- ============================================================
@@ -645,6 +1060,12 @@ begin
     if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'tables') then
       alter publication supabase_realtime add table public.tables;
     end if;
+    if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'reservations') then
+      alter publication supabase_realtime add table public.reservations;
+    end if;
+    if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'expenses') then
+      alter publication supabase_realtime add table public.expenses;
+    end if;
   end if;
 end $$;
 
@@ -658,6 +1079,22 @@ insert into public.settings (key, value) values
   ('invoice_footer', 'Thank you for dining with us!'),
   ('default_prep_time', '5')
 on conflict (key) do nothing;
+
+-- ---------- Expense categories ----------
+insert into public.expense_categories (name) values
+  ('Rent'), ('Electricity'), ('Water'), ('Internet'), ('Salaries'),
+  ('Maintenance'), ('Purchases'), ('Marketing'), ('Miscellaneous')
+on conflict (name) do nothing;
+
+-- ---------- Global tax / VAT configuration ----------
+insert into public.tax_settings (is_vat_enabled, vat_name, vat_rate, is_tax_enabled, tax_name, tax_rate, service_charge_enabled, service_charge_rate, price_includes_tax)
+select false, 'VAT', 0, false, 'Tax', 0, false, 0, false
+where not exists (select 1 from public.tax_settings);
+
+-- ---------- Currency ----------
+insert into public.currency_settings (name, iso_code, symbol, symbol_position, decimal_precision, thousand_separator)
+select 'US Dollar', 'USD', '$', 'before', 2, ','
+where not exists (select 1 from public.currency_settings);
 
 -- ---------- Role landing pages (configurable in Admin -> Settings) ----------
 insert into public.role_default_routes (role, route) values
@@ -682,12 +1119,18 @@ insert into public.payment_methods (name, code, icon) values
 on conflict (code) do nothing;
 
 -- ---------- Demo branch + owner ----------
-insert into public.branches (name, address, contact_info)
-select 'Downtown Bistro', '123 Main Street, Cityville', '+1 555-0100'
+insert into public.branches (name, address, contact_info, description, opening_hours, map_link)
+select 'Downtown Bistro', '123 Main Street, Cityville', '+1 555-0100',
+       'A cozy neighbourhood bistro serving fresh, honest food all day.',
+       'Mon-Sun: 11:00 AM - 11:00 PM',
+       'https://maps.google.com/?q=Downtown+Bistro'
 where not exists (select 1 from public.branches);
 
-insert into public.branches (name, address, contact_info)
-select 'Riverside Kitchen', '45 River Road, Cityville', '+1 555-0120'
+insert into public.branches (name, address, contact_info, description, opening_hours, map_link)
+select 'Riverside Kitchen', '45 River Road, Cityville', '+1 555-0120',
+       'Riverside dining with a seasonal menu and local craft drinks.',
+       'Tue-Sun: 12:00 PM - 10:00 PM',
+       'https://maps.google.com/?q=Riverside+Kitchen'
 where not exists (select 1 from public.branches b where b.name = 'Riverside Kitchen');
 
 -- ---------- Branch payment method defaults ----------
@@ -798,13 +1241,21 @@ from public.branches b
 where b.name = 'Downtown Bistro'
   and not exists (select 1 from public.tables t where t.branch_id = b.id and t.number = 'T3');
 
+-- ---------- Featured (popular) demo dishes ----------
+update public.menu_items set is_featured = true
+where name in ('Grilled Chicken', 'Chocolate Lava Cake', 'Garlic Bread', 'Fresh Lemonade');
+
 -- ============================================================
 -- Storage (Supabase Storage buckets + object-level RLS)
 -- ============================================================
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 values
   ('product-images', 'product-images', true, 5242880, array['image/jpeg', 'image/png', 'image/webp', 'image/gif']),
-  ('branding', 'branding', true, 5242880, array['image/jpeg', 'image/png', 'image/webp'])
+  ('branding', 'branding', true, 5242880, array['image/jpeg', 'image/png', 'image/webp']),
+  ('expense-attachments', 'expense-attachments', true, 10485760,
+   array['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'application/pdf']),
+  ('branch-images', 'branch-images', true, 5242880, array['image/jpeg', 'image/png', 'image/webp', 'image/gif']),
+  ('profile-images', 'profile-images', true, 5242880, array['image/jpeg', 'image/png', 'image/webp', 'image/gif'])
 on conflict (id) do nothing;
 
 -- Public read for images in both buckets.
@@ -812,20 +1263,70 @@ drop policy if exists "public_read_product_images" on storage.objects;
 create policy "public_read_product_images" on storage.objects
   for select using (bucket_id in ('product-images', 'branding'));
 
+drop policy if exists "public_read_expense_attachments" on storage.objects;
+create policy "public_read_expense_attachments" on storage.objects
+  for select using (bucket_id = 'expense-attachments');
+
+drop policy if exists "public_read_branch_profile_images" on storage.objects;
+create policy "public_read_branch_profile_images" on storage.objects
+  for select using (bucket_id in ('branch-images', 'profile-images'));
+
 -- Authenticated staff may upload / replace / delete images.
 drop policy if exists "staff_write_product_images" on storage.objects;
 create policy "staff_write_product_images" on storage.objects
   for all using (
-    bucket_id in ('product-images', 'branding')
+    bucket_id in ('product-images', 'branding', 'expense-attachments', 'branch-images', 'profile-images')
     and exists (
       select 1 from public.staff s
       where s.user_id = auth.uid()
     )
   )
   with check (
-    bucket_id in ('product-images', 'branding')
+    bucket_id in ('product-images', 'branding', 'expense-attachments', 'branch-images', 'profile-images')
     and exists (
       select 1 from public.staff s
       where s.user_id = auth.uid()
     )
   );
+
+drop policy if exists "staff_write_expense_attachments" on storage.objects;
+create policy "staff_write_expense_attachments" on storage.objects
+  for all using (
+    bucket_id = 'expense-attachments'
+    and exists (
+      select 1 from public.staff s
+      where s.user_id = auth.uid()
+    )
+  )
+  with check (
+    bucket_id = 'expense-attachments'
+    and exists (
+      select 1 from public.staff s
+      where s.user_id = auth.uid()
+    )
+  );
+
+-- ============================================================
+-- Scheduled cleanup (activity logs older than 7 days)
+-- ============================================================
+do $$
+begin
+  create extension if not exists pg_cron;
+exception when others then
+  raise notice 'pg_cron not available; run public.cleanup_activity_logs() manually.';
+end;
+$$;
+
+do $$
+begin
+  if exists (select 1 from pg_proc where proname = 'cron.schedule') then
+    if not exists (select 1 from cron.job where jobname = 'cleanup-old-activity-logs') then
+      perform cron.schedule(
+        'cleanup-old-activity-logs',
+        '0 3 * * *',
+        $$select public.cleanup_activity_logs()$$
+      );
+    end if;
+  end if;
+end;
+$$;

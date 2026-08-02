@@ -2,6 +2,8 @@ import { PublicSiteProvider } from '../../context/PublicSiteContext'
 import { MenuDataProvider } from '../../context/MenuDataContext'
 import Header from './Header'
 import Hero from './Hero'
+import PopularItems from './PopularItems'
+import OurBranches from './OurBranches'
 import MenuSection from './MenuSection'
 import Footer from './Footer'
 
@@ -13,6 +15,8 @@ export default function PublicSite() {
           <Header />
           <main className="flex-1">
             <Hero />
+            <PopularItems />
+            <OurBranches />
             <MenuSection />
           </main>
           <Footer />

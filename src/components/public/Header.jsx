@@ -4,6 +4,8 @@ import { usePublicSite } from '../../context/PublicSiteContext'
 import { useMenuData } from '../../context/MenuDataContext'
 
 const NAV_LINKS = [
+  { href: '#popular', label: 'Popular' },
+  { href: '#branches', label: 'Branches' },
   { href: '#menu', label: 'Menu' },
   { href: '#reserve', label: 'Reservation' },
   { href: '#contact', label: 'Contact' }

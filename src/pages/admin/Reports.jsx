@@ -1,13 +1,16 @@
 import { useEffect, useState, useMemo } from 'react'
 import supabase from '../../lib/supabase'
 import { useBranch } from '../../context/BranchContext'
+import { useCurrency } from '../../context/CurrencyContext'
 import PageHeader from '../../components/admin/PageHeader'
 
 export default function Reports() {
   const { branches, activeBranchId, setActiveBranchId, canSwitchBranches } = useBranch()
+  const { formatMoney } = useCurrency()
   const [period, setPeriod] = useState('week')
   const [orders, setOrders] = useState([])
   const [itemsByOrder, setItemsByOrder] = useState({})
+  const [payments, setPayments] = useState([])
   const [loading, setLoading] = useState(true)
   const [mode, setMode] = useState('branch') // branch | consolidated
 
@@ -47,6 +50,14 @@ export default function Reports() {
       } else {
         setItemsByOrder({})
       }
+
+      // Tax/VAT collected in the period, from payments.
+      const payQuery = supabase
+        .from('payments')
+        .select('amount, vat, tax, service_charge, branch_id')
+        .gte('paid_at', since.toISOString())
+      const { data: pays } = branchId ? await payQuery.eq('branch_id', branchId) : await payQuery
+      if (active && !pays?.error) setPayments(pays || [])
       setLoading(false)
     })
 
@@ -62,14 +73,26 @@ export default function Reports() {
     })
     const bestSellers = Object.entries(itemCounts).sort((a, b) => b[1] - a[1]).slice(0, 5)
     const ordersPerDay = orders.length
-    return { revenue, orderCount: orders.length, paidCount: paidOrders.length, bestSellers, ordersPerDay }
-  }, [orders, itemsByOrder])
+    const taxTotal = payments.reduce((s, p) => s + Number(p.vat || 0) + Number(p.tax || 0), 0)
+    const serviceChargeTotal = payments.reduce((s, p) => s + Number(p.service_charge || 0), 0)
+    const collectedTotal = payments.reduce((s, p) => s + Number(p.amount || 0), 0)
+    return {
+      revenue,
+      orderCount: orders.length,
+      paidCount: paidOrders.length,
+      bestSellers,
+      ordersPerDay,
+      taxTotal,
+      serviceChargeTotal,
+      collectedTotal
+    }
+  }, [orders, itemsByOrder, payments])
 
   return (
     <div>
       <PageHeader
         title="Sales Reports"
-        subtitle="Revenue and best sellers across your branches."
+        subtitle="Revenue, taxes and best sellers across your branches."
         actions={
           <>
             {canSwitchBranches && (
@@ -107,7 +130,7 @@ export default function Reports() {
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
             <div className="bg-white rounded-xl border border-stone-200 p-5">
               <div className="text-sm text-stone-500">Revenue</div>
-              <div className="text-2xl font-bold text-stone-900 mt-1">${stats.revenue.toFixed(2)}</div>
+              <div className="text-2xl font-bold text-stone-900 mt-1">{formatMoney(stats.revenue)}</div>
             </div>
             <div className="bg-white rounded-xl border border-stone-200 p-5">
               <div className="text-sm text-stone-500">Orders</div>
@@ -119,25 +142,45 @@ export default function Reports() {
             </div>
             <div className="bg-white rounded-xl border border-stone-200 p-5">
               <div className="text-sm text-stone-500">Avg order value</div>
-              <div className="text-2xl font-bold text-stone-900 mt-1">{stats.paidCount ? `$${(stats.revenue / stats.paidCount).toFixed(2)}` : '$0.00'}</div>
+              <div className="text-2xl font-bold text-stone-900 mt-1">{stats.paidCount ? formatMoney(stats.revenue / stats.paidCount) : formatMoney(0)}</div>
             </div>
           </div>
 
-          <div className="bg-white rounded-xl border border-stone-200 p-6">
-            <h2 className="font-semibold text-stone-900 mb-4">Best sellers</h2>
-            {stats.bestSellers.length === 0 ? (
-              <p className="text-stone-500 text-sm">No items sold in this period.</p>
-            ) : (
-              <ol className="space-y-3">
-                {stats.bestSellers.map(([name, qty], i) => (
-                  <li key={name} className="flex items-center gap-3">
-                    <span className="w-6 h-6 rounded-full bg-brand-100 text-brand-700 text-xs font-bold flex items-center justify-center">{i + 1}</span>
-                    <span className="flex-1 text-sm text-stone-800">{name}</span>
-                    <span className="text-sm font-medium text-stone-600">{qty} sold</span>
-                  </li>
-                ))}
-              </ol>
-            )}
+          <div className="grid lg:grid-cols-2 gap-6 mb-8">
+            <div className="bg-white rounded-xl border border-stone-200 p-6">
+              <h2 className="font-semibold text-stone-900 mb-4">Tax & charges collected</h2>
+              <dl className="space-y-3 text-sm">
+                <div className="flex justify-between">
+                  <dt className="text-stone-500">VAT + tax</dt>
+                  <dd className="font-semibold text-stone-900">{formatMoney(stats.taxTotal)}</dd>
+                </div>
+                <div className="flex justify-between">
+                  <dt className="text-stone-500">Service charge</dt>
+                  <dd className="font-semibold text-stone-900">{formatMoney(stats.serviceChargeTotal)}</dd>
+                </div>
+                <div className="flex justify-between border-t border-stone-100 pt-3">
+                  <dt className="font-medium text-stone-700">Total collected</dt>
+                  <dd className="font-bold text-stone-900">{formatMoney(stats.collectedTotal)}</dd>
+                </div>
+              </dl>
+            </div>
+
+            <div className="bg-white rounded-xl border border-stone-200 p-6">
+              <h2 className="font-semibold text-stone-900 mb-4">Best sellers</h2>
+              {stats.bestSellers.length === 0 ? (
+                <p className="text-stone-500 text-sm">No items sold in this period.</p>
+              ) : (
+                <ol className="space-y-3">
+                  {stats.bestSellers.map(([name, qty], i) => (
+                    <li key={name} className="flex items-center gap-3">
+                      <span className="w-6 h-6 rounded-full bg-brand-100 text-brand-700 text-xs font-bold flex items-center justify-center">{i + 1}</span>
+                      <span className="flex-1 text-sm text-stone-800">{name}</span>
+                      <span className="text-sm font-medium text-stone-600">{qty} sold</span>
+                    </li>
+                  ))}
+                </ol>
+              )}
+            </div>
           </div>
         </>
       )}

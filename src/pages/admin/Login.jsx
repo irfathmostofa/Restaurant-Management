@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useLocation, useNavigate, Link } from 'react-router-dom'
 import supabase from '../../lib/supabase'
 import { fetchDefaultRoute } from '../../lib/config'
+import { logActivity } from '../../lib/activity'
 
 export default function Login() {
   const [email, setEmail] = useState('')
@@ -29,8 +30,14 @@ export default function Login() {
       // per-role route stored in role_default_routes.
       let dest = from
       if (from === '/admin/dashboard') {
-        const { data: staffRow } = await supabase.from('staff').select('role').eq('user_id', data.user.id).maybeSingle()
+        const { data: staffRow } = await supabase.from('staff').select('role, branch_id').eq('user_id', data.user.id).maybeSingle()
         dest = await fetchDefaultRoute(staffRow?.role)
+        logActivity({
+          module: 'auth',
+          action: 'login',
+          description: `Signed in as ${data.user.email}`,
+          branchId: staffRow?.branch_id
+        })
       }
       setLoading(false)
       navigate(dest, { replace: true })

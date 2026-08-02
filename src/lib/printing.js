@@ -6,6 +6,8 @@
 // openPrintWindow() should be called inside the click handler, then
 // printHtml() fills and prints it once the async work (order/payment) is done.
 
+import { DEFAULT_CURRENCY } from '../context/CurrencyContext'
+
 export const RECEIPT_WIDTHS = {
   58: '58mm',
   80: '80mm'
@@ -17,7 +19,23 @@ const esc = (s) => String(s ?? '')
   .replace(/>/g, '&gt;')
   .replace(/"/g, '&quot;')
 
+// Legacy fixed-symbol formatter (kept for callers that have not migrated yet).
 export const fmtMoney = (n) => `$${Number(n || 0).toFixed(2)}`
+
+// Builds a formatter honouring the configured currency (symbol, position,
+// decimal precision, thousand separator).
+export const makeMoneyFormatter = (currency = {}) => {
+  const c = { ...DEFAULT_CURRENCY, ...currency }
+  return (n, opts = {}) => {
+    const value = Number(n || 0)
+    const fixed = value.toFixed(c.decimal_precision ?? 2)
+    const [int, dec] = fixed.split('.')
+    const grouped = int.replace(/\B(?=(\d{3})+(?!\d))/g, c.thousand_separator || ',')
+    const body = dec !== undefined ? `${grouped}.${dec}` : grouped
+    const sym = opts.symbol === false ? '' : (c.symbol || '$')
+    return c.symbol_position === 'after' ? `${body} ${sym}`.trim() : `${sym}${body}`
+  }
+}
 
 export const fmtDateTime = (iso) => {
   if (!iso) return ''
@@ -143,6 +161,8 @@ export function buildKotHtml({
 
 /**
  * Customer POS invoice (after successful payment).
+ * Accepts the configured currency and optional tax components so disabled
+ * tax rows are simply hidden and names (VAT / GST / Sales Tax) are honoured.
  */
 export function buildInvoiceHtml({
   restaurantName,
@@ -156,18 +176,28 @@ export function buildInvoiceHtml({
   items,
   subtotal,
   discount,
-  tax,
+  vat = 0,
+  tax = 0,
+  serviceCharge = 0,
   grandTotal,
+  vatName = 'VAT',
+  taxName = 'Tax',
+  serviceChargeName = 'Service Charge',
   paymentMethod,
   paidAmount,
   changeAmount,
   footer,
   qrData,
   logoUrl,
+  currency = {},
   width = 80
 }) {
+  const fmt = makeMoneyFormatter(currency)
   const hasTable = tableNumber != null && tableNumber !== ''
   const hasDiscount = Number(discount) > 0
+  const hasVat = Number(vat) > 0
+  const hasTax = Number(tax) > 0
+  const hasServiceCharge = Number(serviceCharge) > 0
   const hasChange = Number(changeAmount) > 0
   const qr = qrData
     ? `<img class="qr" width="80" height="80" alt="QR" src="https://api.qrserver.com/v1/create-qr-code/?size=80x80&data=${encodeURIComponent(String(qrData))}" />`
@@ -196,19 +226,21 @@ export function buildInvoiceHtml({
           <tr>
             <td class="name">${esc(it.name)}</td>
             <td class="qty">${esc(it.quantity)}</td>
-            <td class="amt">${fmtMoney(Number(it.price_at_order) * Number(it.quantity))}</td>
+            <td class="amt">${fmt(Number(it.price_at_order) * Number(it.quantity))}</td>
           </tr>
-          <tr><td class="muted" colspan="3">    @ ${fmtMoney(it.price_at_order)} ea</td></tr>
+          <tr><td class="muted" colspan="3">    @ ${fmt(it.price_at_order)} ea</td></tr>
         `).join('')}
       </tbody>
     </table>
     <div class="sep"></div>
-    <div class="row"><span>Subtotal</span><span>${fmtMoney(subtotal)}</span></div>
-    ${hasDiscount ? `<div class="row"><span>Discount</span><span>-${fmtMoney(discount)}</span></div>` : ''}
-    ${Number(tax) > 0 ? `<div class="row"><span>VAT / Tax</span><span>${fmtMoney(tax)}</span></div>` : ''}
-    <div class="row bold"><span>Grand Total</span><span>${fmtMoney(grandTotal)}</span></div>
-    <div class="row"><span>Paid (${esc(paymentMethod)})</span><span>${fmtMoney(paidAmount)}</span></div>
-    ${hasChange ? `<div class="row"><span>Change</span><span>${fmtMoney(changeAmount)}</span></div>` : ''}
+    <div class="row"><span>Subtotal</span><span>${fmt(subtotal)}</span></div>
+    ${hasDiscount ? `<div class="row"><span>Discount</span><span>-${fmt(discount)}</span></div>` : ''}
+    ${hasServiceCharge ? `<div class="row"><span>${esc(serviceChargeName)}</span><span>${fmt(serviceCharge)}</span></div>` : ''}
+    ${hasVat ? `<div class="row"><span>${esc(vatName)}</span><span>${fmt(vat)}</span></div>` : ''}
+    ${hasTax ? `<div class="row"><span>${esc(taxName)}</span><span>${fmt(tax)}</span></div>` : ''}
+    <div class="row bold"><span>Grand Total</span><span>${fmt(grandTotal)}</span></div>
+    <div class="row"><span>Paid (${esc(paymentMethod)})</span><span>${fmt(paidAmount)}</span></div>
+    ${hasChange ? `<div class="row"><span>Change</span><span>${fmt(changeAmount)}</span></div>` : ''}
     <div class="sep"></div>
     ${qr}
     <div class="center thanks">${esc(footer || 'Thank you for dining with us!')}</div>

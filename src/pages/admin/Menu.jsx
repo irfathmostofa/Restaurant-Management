@@ -1,17 +1,20 @@
 import { useEffect, useState } from 'react'
 import supabase from '../../lib/supabase'
 import { useBranch } from '../../context/BranchContext'
+import { useCurrency } from '../../context/CurrencyContext'
 import PageHeader from '../../components/admin/PageHeader'
 import Modal from '../../components/admin/Modal'
 import EmptyState from '../../components/admin/EmptyState'
 import ImageUploader from '../../components/admin/ImageUploader'
 import { deleteUploadedImage } from '../../lib/storage'
+import { logActivity } from '../../lib/activity'
 
-const emptyItem = { name: '', description: '', price: '', category_id: '', photo_url: '', is_available: true, requires_kitchen: true, sort_order: 0 }
+const emptyItem = { name: '', description: '', price: '', category_id: '', photo_url: '', is_available: true, requires_kitchen: true, is_featured: false, sort_order: 0 }
 const emptyCat = { name: '', sort_order: 0 }
 
 export default function Menu() {
   const { activeBranch, activeBranchId } = useBranch()
+  const { formatMoney } = useCurrency()
   const [categories, setCategories] = useState([])
   const [items, setItems] = useState([])
   const [loading, setLoading] = useState(true)
@@ -68,6 +71,12 @@ export default function Menu() {
     setSaving(false)
     if (error) { setError(error.message); return }
     setItemModal(false)
+    logActivity({
+      module: 'menu',
+      action: itemEditing ? 'update' : 'create',
+      description: `${itemEditing ? 'Updated' : 'Created'} menu item "${payload.name}"`,
+      branchId: activeBranchId
+    })
     const res = await supabase.from('menu_items').select('*').eq('branch_id', activeBranchId).order('sort_order')
     if (!res.error) setItems(res.data || [])
   }
@@ -90,6 +99,17 @@ export default function Menu() {
   const toggleAvailability = async (item) => {
     await supabase.from('menu_items').update({ is_available: !item.is_available }).eq('id', item.id)
     setItems(items.map((i) => i.id === item.id ? { ...i, is_available: !item.is_available } : i))
+  }
+
+  const toggleFeatured = async (item) => {
+    await supabase.from('menu_items').update({ is_featured: !item.is_featured }).eq('id', item.id)
+    setItems(items.map((i) => i.id === item.id ? { ...i, is_featured: !item.is_featured } : i))
+    logActivity({
+      module: 'menu',
+      action: 'update',
+      description: `${item.is_featured ? 'Unfeatured' : 'Featured'} menu item "${item.name}"`,
+      branchId: activeBranchId
+    })
   }
 
   const deleteItem = async (item) => {
@@ -147,6 +167,7 @@ export default function Menu() {
                     <th className="px-5 py-2 font-medium">Price</th>
                     <th className="px-5 py-2 font-medium">Kitchen</th>
                     <th className="px-5 py-2 font-medium">Availability</th>
+                    <th className="px-5 py-2 font-medium">Featured</th>
                     <th className="px-5 py-2 font-medium text-right">Actions</th>
                     </tr>
                   </thead>
@@ -164,7 +185,7 @@ export default function Menu() {
                             </div>
                           </div>
                         </td>
-                        <td className="px-5 py-3 text-stone-700">${Number(item.price).toFixed(2)}</td>
+                        <td className="px-5 py-3 text-stone-700">{formatMoney(item.price)}</td>
                         <td className="px-5 py-3">
                           <span className={`text-xs font-medium rounded-full px-2.5 py-0.5 ${item.requires_kitchen !== false ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>
                             {item.requires_kitchen !== false ? 'Kitchen' : 'Ready'}
@@ -176,6 +197,14 @@ export default function Menu() {
                             className={`text-xs font-medium rounded-full px-2.5 py-0.5 ${item.is_available ? 'bg-emerald-100 text-emerald-700' : 'bg-stone-100 text-stone-500'}`}
                           >
                             {item.is_available ? 'Available' : 'Sold out'}
+                          </button>
+                        </td>
+                        <td className="px-5 py-3">
+                          <button
+                            onClick={() => toggleFeatured(item)}
+                            className={`text-xs font-medium rounded-full px-2.5 py-0.5 ${item.is_featured ? 'bg-purple-100 text-purple-700' : 'bg-stone-100 text-stone-500'}`}
+                          >
+                            {item.is_featured ? 'Featured' : 'Show'}
                           </button>
                         </td>
                         <td className="px-5 py-3 text-right space-x-3">
@@ -201,7 +230,7 @@ export default function Menu() {
               <input value={itemForm.name} onChange={(e) => setItemForm({ ...itemForm, name: e.target.value })} required className="w-full px-3 py-2 rounded-lg border border-stone-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500" />
             </div>
             <div>
-              <label className="block text-sm font-medium text-stone-700 mb-1">Price ($) *</label>
+              <label className="block text-sm font-medium text-stone-700 mb-1">Price *</label>
               <input type="number" step="0.01" min="0" value={itemForm.price} onChange={(e) => setItemForm({ ...itemForm, price: e.target.value })} required className="w-full px-3 py-2 rounded-lg border border-stone-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500" />
             </div>
           </div>
@@ -231,6 +260,10 @@ export default function Menu() {
           <label className="flex items-center gap-2 text-sm text-stone-700">
             <input type="checkbox" checked={itemForm.requires_kitchen !== false} onChange={(e) => setItemForm({ ...itemForm, requires_kitchen: e.target.checked })} className="rounded" />
             Requires kitchen (sent to kitchen queue)
+          </label>
+          <label className="flex items-center gap-2 text-sm text-stone-700">
+            <input type="checkbox" checked={!!itemForm.is_featured} onChange={(e) => setItemForm({ ...itemForm, is_featured: e.target.checked })} className="rounded" />
+            Featured on the public website
           </label>
           {error && <p className="text-sm text-red-600">{error}</p>}
           <div className="flex justify-end gap-3 pt-2">

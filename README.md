@@ -28,7 +28,7 @@ cp .env.example .env
 # 1. Open Supabase Dashboard -> SQL Editor
 # 2. Run the whole file: supabase/schema.sql  (fresh install)
 # 3. Already deployed? Instead of schema.sql, run the incremental migrations
-#    in supabase/migrations/ in order (001 -> 005).
+#    in supabase/migrations/ in order (001 -> 014).
 
 npm run dev
 ```
@@ -70,6 +70,41 @@ bootstrap instructions (including how to create your first owner account).
   quality until the file is at least 30% smaller) so storage and load times
   stay low.
 
+## V1.2 features
+
+- **Dynamic currency** — currency name, ISO code, symbol, symbol position
+  (before/after) and decimal precision are configured in
+  `Admin → Settings → Currency`; every monetary display (POS, invoices, reports,
+  expenses, public menu) formats through `useCurrency()`.
+- **Tax & VAT module** — owner/admin define global VAT and service-charge/tax
+  (names, percentages, inclusive vs exclusive) in `Admin → Tax & VAT`, with
+  per-branch overrides. The POS auto-calculates totals from the effective
+  settings and invoices print each component (hidden when zero).
+- **Invoice management** — search/reprint any paid invoice with filters
+  (invoice no, customer, payment method, cashier, branch, order type, date
+  range); thermal 58mm/80mm reprinting via `Admin → Invoices`.
+- **Expense management** — expense categories (rent, electricity, water,
+  internet, salaries, maintenance, purchases, marketing, miscellaneous), branch
+  & category breakdowns, monthly/daily summaries and optional attachments in
+  `Admin → Expenses`.
+- **Profile & account** — update name, phone, address, profile photo and
+  password; shows role, branch, status and last login (`Admin → Profile`).
+- **Activity log** — every staff action (login/logout, orders, payments,
+  invoices, expenses, staff/branch/menu changes, tax/currency updates) is
+  recorded; owner/admin review/filter it and logs older than 7 days are
+  cleaned automatically (`Admin → Activity Log`).
+- **Manager staff management** — managers can create, edit, activate,
+  deactivate and reset passwords for staff **in their own branch only** (no
+  owner/admin accounts, no branch reassignment).
+- **Public site upgrades** — "Popular Menu Items" (featured items) and "Our
+  Branches" cards (photo, address, contact, opening hours, description, map &
+  menu links) on the storefront.
+- **Responsive admin UI** — desktop sidebar + mobile drawer navigation, no
+  horizontal scroll on small screens, paginated lists and lazy-loaded routes.
+- **POS improvements** — category filters/search with keyboard shortcut, touch
+  friendly product grid, sticky cart with notes, totals breakdown, kitchen
+  status, and duplicate-submit protection.
+
 ## Architecture
 
 ### Public website (route `/`)
@@ -98,9 +133,9 @@ Single-page-feel storefront in this vertical order:
 
 | Role    | Nav / access                                                        | Default landing          |
 |---------|---------------------------------------------------------------------|--------------------------|
-| owner   | Full nav: dashboard, branches, menu, tables, reservations, staff, orders, reports, order-taking, payment methods, settings | `/admin/dashboard` |
+| owner   | Full nav: dashboard, branches, menu, tables, reservations, staff, orders, invoices, expenses, tax & VAT, activity log, reports, order-taking, payment methods, settings | `/admin/dashboard` |
 | admin   | Same as owner                                                        | `/admin/dashboard` |
-| manager | Menu, tables, reservations, orders, reports, order-taking, payment methods (scoped to their branch) | `/admin/dashboard` |
+| manager | Menu, tables, reservations, orders, invoices, expenses, staff (own branch only), reports, order-taking, payment methods (scoped to their branch) | `/admin/dashboard` |
 | waiter  | Order Taking + Billing (scoped to their branch)                      | `/admin/order-taking` |
 | cashier | POS/Billing + Order Taking (scoped to their branch)                  | `/admin/billing` |
 | kitchen | Order Queue (status updates only, scoped to their branch)            | `/admin/orders` |
@@ -126,9 +161,17 @@ Default landing pages are configurable in `Admin → Settings` (stored in the
   are marked ready immediately. A kitchen ticket (KOT) prints automatically for
   kitchen items when the order is placed.
 - **Billing** — charge open orders with the payment methods enabled for the
-  branch (Cash/Card/bKash/Nagad/Rocket/Bank Transfer/QR/UPI), optional discount
-  and VAT, cash received/change, frees the table on payment, and prints a
-  customer invoice automatically.
+  branch (Cash/Card/bKash/Nagad/Rocket/Bank Transfer/QR/UPI), optional discount,
+  automatic VAT/service-charge from the branch's effective tax settings, cash
+  received/change, frees the table on payment, and prints a customer invoice
+  automatically.
+- **Invoice management** — every paid order produces an invoice; search, filter
+  and reprint it in 58mm/80mm thermal format with a full item/charge breakdown.
+- **Expenses** — branch-scoped expense tracking with categories, attachments,
+  summaries and category breakdowns.
+- **Tax & VAT settings** — global VAT/service-charge/tax config with per-branch
+  overrides; drives POS totals and invoice line items.
+- **Activity log** — auditable record of staff actions with auto-cleanup.
 
 ### Database & RLS
 
@@ -169,11 +212,25 @@ For deployments created with the V1 schema, run the files in
 4. `004_role_routes_and_settings.sql` — configurable landing routes + settings
 5. `005_realtime.sql` — add tables to the realtime publication
 6. `006_image_storage.sql` — public storage buckets + object-level RLS
+7. `007_branch_website_and_featured.sql` — branch website fields + featured items
+8. `008_expenses.sql` — expense categories/expenses + attachments bucket + RLS
+9. `009_activity_logs.sql` — activity_logs + `log_activity()` RPC + pg_cron cleanup
+10. `010_tax_settings.sql` — global + per-branch tax/VAT settings + merge helper
+11. `011_currency_settings.sql` — currency config (single row)
+12. `012_profile_and_staff_rls.sql` — staff profile columns, manager staff RLS,
+    `admin_reset_password()`, last-login sync
+13. `013_realtime_and_indexes.sql` — add reservations/expenses to realtime + indexes
+14. `014_profile_and_branch_images.sql` — `branch-images` + `profile-images` buckets
+
+The `quick start` instructions above say `001 -> 005`; run `001 -> 014` in order
+for new deployments.
 
 ## Image storage
 
-- Buckets `product-images` (menu photos) and `branding` (restaurant logo) are
-  created by `schema.sql` / migration 006 and are public-read only.
+- Buckets `product-images` (menu photos), `branding` (restaurant logo),
+  `expense-attachments` (expense files), `branch-images` (branch photos) and
+  `profile-images` (staff profile photos) are created by `schema.sql` /
+  migrations 006, 008 and 014 and are public-read only.
 - Only authenticated staff (a row in `staff` for the signed-in user) can
   upload, replace or delete images — enforced by `storage.objects` policies.
 - The client (`src/lib/storage.js`) optimises every image before upload: it is

@@ -1,10 +1,12 @@
 import { useState } from 'react'
 import { useMenuData } from '../../context/MenuDataContext'
 import { usePublicSite } from '../../context/PublicSiteContext'
+import { useCurrency } from '../../context/CurrencyContext'
 
 export default function MenuSection() {
   const { categories, items, loading, error } = useMenuData()
   const { selectedBranch } = usePublicSite()
+  const { formatMoney } = useCurrency()
   const [activeCat, setActiveCat] = useState(null)
 
   if (!selectedBranch) return null
@@ -64,12 +66,12 @@ export default function MenuSection() {
                     {cat.items.map((item) => (
                       <article key={item.id} className={`bg-white rounded-xl border border-stone-200 overflow-hidden flex ${item.is_available ? '' : 'opacity-60'}`}>
                         <div className="w-24 h-24 shrink-0 bg-stone-100 flex items-center justify-center text-3xl">
-                          {item.photo_url ? <img src={item.photo_url} alt={item.name} className="w-full h-full object-cover" /> : <span>🍽️</span>}
+                          {item.photo_url ? <img src={item.photo_url} alt={item.name} className="w-full h-full object-cover" /> : <span>&#127869;</span>}
                         </div>
                         <div className="p-4 flex-1">
                           <div className="flex items-start justify-between gap-2">
                             <h4 className="font-semibold text-stone-900">{item.name}</h4>
-                            <span className="font-semibold text-brand-700 whitespace-nowrap">${Number(item.price).toFixed(2)}</span>
+                            <span className="font-semibold text-brand-700 whitespace-nowrap">{formatMoney(item.price)}</span>
                           </div>
                           {item.description && <p className="text-sm text-stone-500 mt-1 line-clamp-2">{item.description}</p>}
                           {!item.is_available && (

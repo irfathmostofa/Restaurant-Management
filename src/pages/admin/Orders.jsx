@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from 'react'
 import supabase from '../../lib/supabase'
 import { useBranch } from '../../context/BranchContext'
 import { useAuth } from '../../context/AuthContext'
+import { useCurrency } from '../../context/CurrencyContext'
 import PageHeader from '../../components/admin/PageHeader'
 import EmptyState from '../../components/admin/EmptyState'
 import {
@@ -46,6 +47,7 @@ const groupBy = (arr, key) => (arr || []).reduce((acc, item) => {
 export default function Orders() {
   const { activeBranch, activeBranchId } = useBranch()
   const { staff } = useAuth()
+  const { formatMoney } = useCurrency()
   const isKitchen = staff?.role === 'kitchen'
   const [orders, setOrders] = useState([])
   const [itemsByOrder, setItemsByOrder] = useState({})
@@ -313,13 +315,13 @@ export default function Orders() {
                   {(itemsByOrder[o.id] || []).map((it) => (
                     <li key={it.id} className="flex justify-between gap-2">
                       <span>{it.quantity}× {it.name}</span>
-                      <span className="text-stone-500">${(Number(it.price_at_order) * it.quantity).toFixed(2)}</span>
+                      <span className="text-stone-500">{formatMoney(Number(it.price_at_order) * it.quantity)}</span>
                     </li>
                   ))}
                 </ul>
 
                 <div className="flex items-center justify-between pt-3 border-t border-stone-100">
-                  <span className="font-semibold text-stone-900">${orderTotal(o.id).toFixed(2)}</span>
+                  <span className="font-semibold text-stone-900">{formatMoney(orderTotal(o.id))}</span>
                   <div className="flex items-center gap-2">
                     {NEXT_STATUS[o.status] && (
                       <button

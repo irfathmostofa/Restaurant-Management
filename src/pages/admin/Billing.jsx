@@ -3,12 +3,15 @@ import { useLocation } from 'react-router-dom'
 import supabase from '../../lib/supabase'
 import { useBranch } from '../../context/BranchContext'
 import { useAuth } from '../../context/AuthContext'
+import { useCurrency } from '../../context/CurrencyContext'
 import PageHeader from '../../components/admin/PageHeader'
 import EmptyState from '../../components/admin/EmptyState'
 import { fetchSettings, DEFAULT_SETTINGS } from '../../lib/config'
-import { buildInvoiceHtml, openPrintWindow, printHtml, fmtMoney } from '../../lib/printing'
+import { buildInvoiceHtml, openPrintWindow, printHtml } from '../../lib/printing'
+import { fetchEffectiveTaxSettings, computeTotals, DEFAULT_TAX_SETTINGS } from '../../lib/tax'
 import { hasKitchenItems, orderKitchenEta } from '../../lib/kitchen'
 import useOrderReadyNotifications from '../../hooks/useOrderReadyNotifications'
+import { logActivity } from '../../lib/activity'
 
 const groupBy = (arr, key) => (arr || []).reduce((acc, item) => {
   ;(acc[item[key]] = acc[item[key]] || []).push(item)
@@ -24,6 +27,7 @@ const makeInvoiceNo = () => {
 export default function Billing() {
   const { activeBranch, activeBranchId } = useBranch()
   const { staff } = useAuth()
+  const { formatMoney, currency } = useCurrency()
   const location = useLocation()
   const [orders, setOrders] = useState([])
   const [itemsByOrder, setItemsByOrder] = useState({})
@@ -31,11 +35,11 @@ export default function Billing() {
   const [paymentMethods, setPaymentMethods] = useState([])
   const [paymentsByOrder, setPaymentsByOrder] = useState({})
   const [staffMap, setStaffMap] = useState({})
+  const [taxSettings, setTaxSettings] = useState({ ...DEFAULT_TAX_SETTINGS })
   const [loading, setLoading] = useState(true)
   const [payingOrder, setPayingOrder] = useState(null)
   const [payMethodId, setPayMethodId] = useState(null)
   const [discount, setDiscount] = useState('')
-  const [tax, setTax] = useState('')
   const [paidAmount, setPaidAmount] = useState('')
   const [paying, setPaying] = useState(false)
   const [error, setError] = useState(null)
@@ -53,7 +57,6 @@ export default function Billing() {
     setPayingOrder(orderId)
     setPayMethodId(paymentMethods[0]?.id || null)
     setDiscount('')
-    setTax('')
     setPaidAmount('')
     setError(null)
   }
@@ -89,6 +92,7 @@ export default function Billing() {
           if (active) setPaymentMethods(data || [])
         })
       }
+      fetchEffectiveTaxSettings(activeBranchId).then((ts) => { if (active) setTaxSettings(ts) })
       setLoading(false)
     })
     return () => { active = false }
@@ -176,8 +180,7 @@ export default function Billing() {
   const selectedMethod = paymentMethods.find((m) => m.id === payMethodId)
   const subtotal = payingOrder ? total(payingOrder) : 0
   const disc = Number(discount) || 0
-  const taxAmt = Number(tax) || 0
-  const grandTotal = Math.max(0, subtotal - disc + taxAmt)
+  const { vat, tax, serviceCharge, grandTotal } = computeTotals({ subtotal, discount: disc, taxSettings })
   const isCash = selectedMethod?.code === 'cash'
   const received = isCash ? Number(paidAmount) || 0 : grandTotal
   const change = isCash ? Math.max(0, received - grandTotal) : 0
@@ -208,7 +211,9 @@ export default function Billing() {
       invoice_no: invoiceNo,
       subtotal,
       discount: disc,
-      tax: taxAmt,
+      vat,
+      tax,
+      service_charge: serviceCharge,
       paid_amount: received,
       change_amount: change,
       cashier_id: staff?.id || null
@@ -228,6 +233,14 @@ export default function Billing() {
     setPaying(false)
     setPayingOrder(null)
 
+    logActivity({
+      module: 'payments',
+      action: 'paid',
+      description: `Charged ${formatMoney(grandTotal, { symbol: false })} for order #${orderId.slice(0, 8).toUpperCase()} (${selectedMethod.name})`,
+      branchId: activeBranchId,
+      metadata: { order_id: orderId, invoice_no: invoiceNo, amount: grandTotal }
+    })
+
     if (win) {
       const settings = await fetchSettings()
       const items = itemsByOrder[orderId] || []
@@ -244,14 +257,20 @@ export default function Billing() {
         items,
         subtotal,
         discount: disc,
-        tax: taxAmt,
+        vat,
+        tax,
+        serviceCharge,
         grandTotal,
+        vatName: taxSettings.vat_name,
+        taxName: taxSettings.tax_name,
+        serviceChargeName: 'Service Charge',
         paymentMethod: selectedMethod.name,
         paidAmount: received,
         changeAmount: change,
         footer: settings.invoice_footer || DEFAULT_SETTINGS.invoice_footer,
         qrData: invoiceNo,
-        logoUrl: settings.restaurant_logo || ''
+        logoUrl: settings.restaurant_logo || '',
+        currency
       })
       printHtml(win, html)
     }
@@ -276,16 +295,28 @@ export default function Billing() {
       items,
       subtotal: payment.subtotal ?? total(order.id),
       discount: payment.discount ?? 0,
+      vat: payment.vat ?? 0,
       tax: payment.tax ?? 0,
+      serviceCharge: payment.service_charge ?? 0,
       grandTotal: payment.amount,
+      vatName: taxSettings.vat_name,
+      taxName: taxSettings.tax_name,
       paymentMethod: method?.name || '—',
       paidAmount: payment.paid_amount ?? payment.amount,
       changeAmount: payment.change_amount ?? 0,
       footer: settings.invoice_footer || DEFAULT_SETTINGS.invoice_footer,
       qrData: payment.invoice_no || '',
-      logoUrl: settings.restaurant_logo || ''
+      logoUrl: settings.restaurant_logo || '',
+      currency
     })
     printHtml(win, html)
+    logActivity({
+      module: 'invoices',
+      action: 'reprint',
+      description: `Reprinted invoice ${payment.invoice_no || `INV-${order.id.slice(0, 8).toUpperCase()}`}`,
+      branchId: activeBranchId,
+      metadata: { payment_id: payment.id }
+    })
   }
 
   return (
@@ -345,12 +376,12 @@ export default function Billing() {
                   {(itemsByOrder[o.id] || []).map((it) => (
                     <li key={it.id} className="flex justify-between gap-2">
                       <span>{it.quantity}× {it.name}</span>
-                      <span className="text-stone-500">${(Number(it.price_at_order) * it.quantity).toFixed(2)}</span>
+                      <span className="text-stone-500">{formatMoney(Number(it.price_at_order) * it.quantity)}</span>
                     </li>
                   ))}
                 </ul>
                 <div className="flex items-center justify-between pt-3 border-t border-stone-100">
-                  <span className="font-semibold text-stone-900">{fmtMoney(total(o.id))}</span>
+                  <span className="font-semibold text-stone-900">{formatMoney(total(o.id))}</span>
                   <div className="flex items-center gap-2">
                     {o.status === 'paid' ? (
                       <button onClick={() => reprintInvoice(o)} className="px-3 py-1.5 rounded-lg border border-stone-300 text-stone-600 text-sm font-medium hover:bg-stone-50">
@@ -378,17 +409,16 @@ export default function Billing() {
 
             <div className="flex justify-between items-center mb-4">
               <span className="text-sm text-stone-500">Subtotal</span>
-              <span className="text-xl font-bold text-stone-900">{fmtMoney(subtotal)}</span>
+              <span className="text-xl font-bold text-stone-900">{formatMoney(subtotal)}</span>
             </div>
 
             <div className="grid grid-cols-2 gap-3 mb-4">
               <div>
-                <label className="block text-sm font-medium text-stone-700 mb-1">Discount ($)</label>
+                <label className="block text-sm font-medium text-stone-700 mb-1">Discount</label>
                 <input type="number" min="0" step="0.01" value={discount} onChange={(e) => setDiscount(e.target.value)} placeholder="0.00" className="w-full px-3 py-2 rounded-lg border border-stone-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500" />
               </div>
-              <div>
-                <label className="block text-sm font-medium text-stone-700 mb-1">VAT / Tax ($)</label>
-                <input type="number" min="0" step="0.01" value={tax} onChange={(e) => setTax(e.target.value)} placeholder="0.00" className="w-full px-3 py-2 rounded-lg border border-stone-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500" />
+              <div className="flex items-end">
+                <span className="text-xs text-stone-400 pb-2">{formatMoney(disc)} off</span>
               </div>
             </div>
 
@@ -408,16 +438,42 @@ export default function Billing() {
               )}
             </div>
 
+            <div className="space-y-1 mb-4 text-sm">
+              <div className="flex justify-between text-stone-600">
+                <span>Subtotal</span><span>{formatMoney(subtotal)}</span>
+              </div>
+              {disc > 0 && (
+                <div className="flex justify-between text-stone-600">
+                  <span>Discount</span><span>-{formatMoney(disc)}</span>
+                </div>
+              )}
+              {serviceCharge > 0 && (
+                <div className="flex justify-between text-stone-600">
+                  <span>Service charge</span><span>{formatMoney(serviceCharge)}</span>
+                </div>
+              )}
+              {vat > 0 && (
+                <div className="flex justify-between text-stone-600">
+                  <span>{taxSettings.vat_name || 'VAT'} ({taxSettings.vat_rate}%)</span><span>{formatMoney(vat)}</span>
+                </div>
+              )}
+              {tax > 0 && (
+                <div className="flex justify-between text-stone-600">
+                  <span>{taxSettings.tax_name || 'Tax'} ({taxSettings.tax_rate}%)</span><span>{formatMoney(tax)}</span>
+                </div>
+              )}
+            </div>
+
             <div className="flex justify-between items-center py-3 border-t border-stone-100">
               <span className="font-semibold text-stone-800">Grand total</span>
-              <span className="text-2xl font-bold text-stone-900">{fmtMoney(grandTotal)}</span>
+              <span className="text-2xl font-bold text-stone-900">{formatMoney(grandTotal)}</span>
             </div>
 
             {isCash && (
               <div className="mb-4">
                 <label className="block text-sm font-medium text-stone-700 mb-1">Cash received</label>
                 <input type="number" min="0" step="0.01" value={paidAmount} onChange={(e) => setPaidAmount(e.target.value)} placeholder={grandTotal.toFixed(2)} className="w-full px-3 py-2 rounded-lg border border-stone-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500" />
-                <p className="text-sm text-stone-500 mt-1">Change: <b className="text-stone-800">{fmtMoney(change)}</b></p>
+                <p className="text-sm text-stone-500 mt-1">Change: <b className="text-stone-800">{formatMoney(change)}</b></p>
               </div>
             )}
 

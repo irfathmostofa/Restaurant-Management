@@ -1,5 +1,5 @@
 import { NavLink, useNavigate, Outlet } from "react-router-dom";
-import { useEffect, useState, Suspense } from "react";
+import { useEffect, useState, Suspense, useRef } from "react";
 import { useAuth } from "../../context/AuthContext";
 import { useBranch } from "../../context/BranchContext";
 import {
@@ -12,85 +12,81 @@ import { logActivity } from "../../lib/activity";
 import Icon from "../Icon";
 import supabase from "../../lib/supabase";
 
-function SidebarContent({ staff, nav, activeBranch, navigate, onNavigate }) {
-  const handleLogout = async () => {
-    // Log the audit event BEFORE signing out (auth.uid() is still set).
-    logActivity({
-      module: "auth",
-      action: "logout",
-      description: `${staff?.name || "User"} signed out.`,
-      branchId: activeBranch?.id,
-    });
-    await supabase.auth.signOut();
-    navigate("/");
-  };
-
+function SidebarContent({
+  staff,
+  nav,
+  activeBranch,
+  navigate,
+  onNavigate,
+  isCollapsed,
+}) {
   return (
     <div className="flex flex-col h-full">
-      <div className="px-5 py-5 border-b border-stone-800">
+      {/* Header - fixed */}
+      <div
+        className={` py-5 border-b border-stone-800 flex-shrink-0 ${isCollapsed ? "px-3" : "px-5"}`}
+      >
         <div className="flex items-center gap-2">
-          <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-brand-600 text-white font-bold">
+          <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-brand-600 text-white font-bold shrink-0">
             R
           </span>
-          <div>
-            <div className="font-semibold text-white text-sm leading-tight">
-              RestaurantHub
+          {!isCollapsed && (
+            <div>
+              <div className="font-semibold text-white text-sm leading-tight">
+                RestaurantHub
+              </div>
+              <div className="text-xs text-stone-500">Staff Portal</div>
             </div>
-            <div className="text-xs text-stone-500">Staff Portal</div>
-          </div>
+          )}
         </div>
       </div>
 
-      <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-1 sidebar-nav-scroll">
+      {/* Navigation - scrollable */}
+      <nav
+        className={`flex-1 overflow-y-auto ${isCollapsed ? "px-0" : "px-3"}  py-4 space-y-1 sidebar-nav-scroll min-h-0`}
+      >
         {nav.map((item) => (
           <NavLink
             key={item.to}
             to={item.to}
             onClick={onNavigate}
             className={({ isActive }) =>
-              `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+              `flex items-center gap-3 rounded-lg text-sm font-medium transition-colors ${
                 isActive
-                  ? "bg-brand-600 text-white"
-                  : "text-stone-400 hover:bg-stone-800 hover:text-white"
+                  ? isCollapsed
+                    ? "bg-brand-600 text-white w-10 h-10 justify-center mx-auto"
+                    : "bg-brand-600 text-white px-3 py-2.5"
+                  : isCollapsed
+                    ? "text-stone-400 hover:bg-stone-800 hover:text-white w-10 h-10 justify-center mx-auto"
+                    : "text-stone-400 hover:bg-stone-800 hover:text-white px-3 py-2.5"
               }`
             }
           >
-            <Icon name={item.icon} className="w-4 h-4 shrink-0" />
-            <span className="truncate">{item.label}</span>
+            <Icon
+              name={item.icon}
+              className={`shrink-0 ${isCollapsed ? "w-5 h-5" : "w-5 h-5"}`}
+            />
+            {!isCollapsed && <span className="truncate">{item.label}</span>}
           </NavLink>
         ))}
       </nav>
 
-      <div className="px-5 py-4 border-t border-stone-800 space-y-3">
-        <div className="text-sm">
-          <div className="font-medium text-white">{staff.name}</div>
-          <div className="text-xs text-stone-500">
-            {ROLE_LABELS[staff.role] || staff.role}
+      {/* Footer - minimal, only shows branch if not collapsed */}
+      {!isCollapsed && (
+        <div className="px-5 py-3 border-t border-stone-800 flex-shrink-0">
+          <div className="text-xs text-brand-400 truncate">
+            Developed by{" "}
+            <a
+              href="https://irfathchowdhuryjoy.web.app/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline"
+            >
+              Irfath Chowdhury Joy
+            </a>
           </div>
-          {activeBranch && (
-            <div className="text-xs text-brand-400 mt-1 truncate">
-              {activeBranch.name}
-            </div>
-          )}
         </div>
-        <button
-          onClick={() => {
-            onNavigate();
-            navigate("/admin/profile");
-          }}
-          className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium bg-stone-800 hover:bg-stone-700 text-stone-300 transition-colors"
-        >
-          <Icon name="user" className="w-4 h-4" />
-          My profile
-        </button>
-        <button
-          onClick={handleLogout}
-          className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium bg-stone-800 hover:bg-stone-700 text-stone-300 transition-colors"
-        >
-          <Icon name="log-out" className="w-4 h-4" />
-          Sign out
-        </button>
-      </div>
+      )}
     </div>
   );
 }
@@ -109,6 +105,10 @@ export default function AdminShell() {
     DEFAULT_ROUTE_BY_ROLE[staff?.role] || "/admin/dashboard",
   );
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const menuRef = useRef(null);
+
   function HeaderClock() {
     const [now, setNow] = useState(new Date());
     useEffect(() => {
@@ -131,6 +131,18 @@ export default function AdminShell() {
       </div>
     );
   }
+
+  // Close user menu when clicking outside
+  useEffect(() => {
+    function handleClickOutside(event) {
+      if (menuRef.current && !menuRef.current.contains(event.target)) {
+        setUserMenuOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
   useEffect(() => {
     if (!staff?.role) return;
     let active = true;
@@ -146,26 +158,36 @@ export default function AdminShell() {
 
   const nav = NAV_BY_ROLE[staff.role] || [];
 
-  const homeLabel = homeRoute.includes("order-taking")
-    ? "Order Screen"
-    : homeRoute.includes("billing")
-      ? "POS / Billing"
-      : homeRoute.includes("orders")
-        ? "Kitchen Display"
-        : "Dashboard";
-
   const closeDrawer = () => setMobileOpen(false);
+  const toggleSidebar = () => setSidebarCollapsed(!sidebarCollapsed);
+  const toggleUserMenu = () => setUserMenuOpen(!userMenuOpen);
+
+  const handleLogout = async () => {
+    logActivity({
+      module: "auth",
+      action: "logout",
+      description: `${staff?.name || "User"} signed out.`,
+      branchId: activeBranch?.id,
+    });
+    await supabase.auth.signOut();
+    navigate("/");
+  };
 
   return (
     <div className="min-h-screen bg-stone-100 flex">
       {/* Desktop sidebar */}
-      <aside className="hidden lg:flex w-64 shrink-0 bg-stone-900 text-stone-300 flex-col fixed inset-y-0 left-0 z-30">
+      <aside
+        className={`hidden lg:flex bg-stone-900 text-stone-300 flex-col fixed inset-y-0 left-0 z-30 transition-all duration-300 ${
+          sidebarCollapsed ? "w-16" : "w-64"
+        }`}
+      >
         <SidebarContent
           staff={staff}
           nav={nav}
           activeBranch={activeBranch}
           navigate={navigate}
           onNavigate={() => {}}
+          isCollapsed={sidebarCollapsed}
         />
       </aside>
 
@@ -187,24 +209,31 @@ export default function AdminShell() {
               activeBranch={activeBranch}
               navigate={navigate}
               onNavigate={closeDrawer}
+              isCollapsed={false}
             />
           </aside>
         </div>
       )}
 
       {/* Main content */}
-      <div className="flex-1 lg:ml-64 flex flex-col min-w-0">
+      <div
+        className={`flex-1 flex flex-col min-w-0 transition-all duration-300 ${
+          sidebarCollapsed ? "lg:ml-16" : "lg:ml-64"
+        }`}
+      >
         <header className="sticky top-0 z-20 bg-white border-b border-stone-200 px-4 sm:px-6 py-3 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2 min-w-0">
+          <div className="flex items-center gap-3 min-w-0">
             <button
-              onClick={() => setMobileOpen(true)}
-              aria-label="Open menu"
-              className="lg:hidden p-2 -ml-2 rounded-lg text-stone-600 hover:bg-stone-100"
+              onClick={toggleSidebar}
+              className="hidden lg:flex items-center justify-center w-8 h-8 rounded-lg hover:bg-stone-100 text-stone-600 hover:text-stone-800 transition-colors"
+              title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
             >
-              <Icon name="menu" className="w-5 h-5" />
+              <Icon name="control" className="w-5 h-5" />
             </button>
-            {<HeaderClock />}
+
+            <HeaderClock />
           </div>
+
           <div className="flex items-center gap-3 min-w-0">
             {canSwitchBranches ? (
               <select
@@ -225,21 +254,61 @@ export default function AdminShell() {
                 Branch: {activeBranch.name}
               </span>
             ) : null}
-            <NavLink
-              to="/admin/profile"
-              className="flex items-center justify-center w-9 h-9 rounded-full bg-brand-100 text-brand-700 font-bold text-sm shrink-0 hover:bg-brand-200 transition-colors"
-              title={staff.name}
-            >
-              {staff.profile_image_url ? (
-                <img
-                  src={staff.profile_image_url}
-                  alt={staff.name}
-                  className="w-9 h-9 rounded-full object-cover"
-                />
-              ) : (
-                <span>{staff.name?.charAt(0)?.toUpperCase() || "U"}</span>
+
+            {/* User menu dropdown */}
+            <div className="relative" ref={menuRef}>
+              <button
+                onClick={toggleUserMenu}
+                className="flex items-center justify-center w-9 h-9 rounded-full bg-brand-100 text-brand-700 font-bold text-sm shrink-0 hover:bg-brand-200 transition-colors focus:outline-none focus:ring-2 focus:ring-brand-500"
+                title={staff.name}
+              >
+                {staff.profile_image_url ? (
+                  <img
+                    src={staff.profile_image_url}
+                    alt={staff.name}
+                    className="w-9 h-9 rounded-full object-cover"
+                  />
+                ) : (
+                  <span>{staff.name?.charAt(0)?.toUpperCase() || "U"}</span>
+                )}
+              </button>
+
+              {/* Dropdown menu */}
+              {userMenuOpen && (
+                <div className="absolute right-0 mt-2 w-64 bg-white rounded-lg shadow-lg border border-stone-200 py-1 z-50">
+                  <div className="px-4 py-3 border-b border-stone-100">
+                    <div className="font-medium text-stone-800">
+                      {staff.name}
+                    </div>
+                    <div className="text-xs text-stone-500">
+                      {ROLE_LABELS[staff.role] || staff.role}
+                    </div>
+                    {activeBranch && (
+                      <div className="text-xs text-brand-600 mt-1 truncate">
+                        {activeBranch.name}
+                      </div>
+                    )}
+                  </div>
+
+                  <NavLink
+                    to="/admin/profile"
+                    onClick={() => setUserMenuOpen(false)}
+                    className="flex items-center gap-3 px-4 py-2.5 text-sm text-stone-700 hover:bg-stone-50 transition-colors"
+                  >
+                    <Icon name="user" className="w-4 h-4 text-stone-400" />
+                    My Profile
+                  </NavLink>
+
+                  <button
+                    onClick={handleLogout}
+                    className="flex items-center gap-3 px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 transition-colors w-full border-t border-stone-100"
+                  >
+                    <Icon name="log-out" className="w-4 h-4 text-red-400" />
+                    Sign Out
+                  </button>
+                </div>
               )}
-            </NavLink>
+            </div>
           </div>
         </header>
         <main className="flex-1 p-4 sm:p-6 min-w-0">

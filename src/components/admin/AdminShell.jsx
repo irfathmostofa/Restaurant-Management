@@ -41,7 +41,7 @@ function SidebarContent({ staff, nav, activeBranch, navigate, onNavigate }) {
         </div>
       </div>
 
-      <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-1">
+      <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-1 sidebar-nav-scroll">
         {nav.map((item) => (
           <NavLink
             key={item.to}

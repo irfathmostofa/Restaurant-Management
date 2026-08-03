@@ -10,6 +10,7 @@ import { hasKitchenItems } from "../../lib/kitchen";
 import useOrderReadyNotifications from "../../hooks/useOrderReadyNotifications";
 import { logActivity } from "../../lib/activity";
 import PageHeader from "../../components/admin/PageHeader";
+import Modal from "../../components/admin/Modal";
 
 export default function OrderTaking() {
   const { activeBranch, activeBranchId } = useBranch();
@@ -17,7 +18,7 @@ export default function OrderTaking() {
   const { formatMoney } = useCurrency();
   const navigate = useNavigate();
   const [tables, setTables] = useState([]);
-  const [menuItems, setMenuItems] = useState([]); // merged: menu_items + this branch's availability
+  const [menuItems, setMenuItems] = useState([]); // merged: menu_items + this branch's availability + variants
   const [categories, setCategories] = useState([]);
   const [activeCategory, setActiveCategory] = useState("all");
   const [search, setSearch] = useState("");
@@ -26,9 +27,11 @@ export default function OrderTaking() {
   const [selectedTable, setSelectedTable] = useState(null);
   const [customerName, setCustomerName] = useState("");
   const [orderNotes, setOrderNotes] = useState("");
-  const [cart, setCart] = useState([]); // { menu_item_id, name, price, quantity, notes, requires_kitchen }
+  // cart line: { key, menu_item_id, variant_id, name, price, quantity, notes, requires_kitchen }
+  const [cart, setCart] = useState([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
+  const [variantPickerItem, setVariantPickerItem] = useState(null); // item awaiting a variant choice
   const searchRef = useRef(null);
   const { notifications, dismiss } = useOrderReadyNotifications(activeBranchId);
 
@@ -44,10 +47,11 @@ export default function OrderTaking() {
         .order("number"),
       // menu_items/categories are GLOBAL now. What's actually orderable at
       // THIS branch comes from branch_menu_items — join through it so we
-      // get each item plus this branch's own is_available flag.
+      // get each item plus this branch's own is_available flag, plus its
+      // variants (size/option choices) in the same round trip.
       supabase
         .from("branch_menu_items")
-        .select("is_available, menu_item_id, menu_items(*)")
+        .select("is_available, menu_item_id, menu_items(*, menu_item_variants(*))")
         .eq("branch_id", activeBranchId),
       supabase.from("categories").select("*").order("sort_order"),
     ]).then(([tablesRes, bmiRes, catRes]) => {
@@ -56,10 +60,16 @@ export default function OrderTaking() {
       if (!bmiRes.error) {
         const merged = (bmiRes.data || [])
           .filter((row) => row.menu_items) // guard against a dangling row if an item was deleted
-          .map((row) => ({
-            ...row.menu_items,
-            branch_available: row.is_available,
-          }))
+          .map((row) => {
+            const { menu_item_variants, ...item } = row.menu_items;
+            return {
+              ...item,
+              branch_available: row.is_available,
+              variants: (menu_item_variants || []).slice().sort(
+                (a, b) => (a.sort_order || 0) - (b.sort_order || 0),
+              ),
+            };
+          })
           .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
         setMenuItems(merged);
       }
@@ -128,18 +138,39 @@ export default function OrderTaking() {
     return <p className="text-stone-500">Select a branch to take orders.</p>;
   }
 
-  const addToCart = (item) => {
+  // Tapping a tile: items with variants need a size/option choice first;
+  // items without variants add straight to the cart.
+  const handleItemTap = (item) => {
+    if (item.variants && item.variants.length > 0) {
+      setVariantPickerItem(item);
+    } else {
+      addLineToCart(item, null);
+    }
+  };
+
+  // order_items has no variant_id column — variants are baked into the
+  // denormalized `name`/`price_at_order` snapshot, same as everything else
+  // on that table. `key` is client-side only, used to keep each variant
+  // as its own cart line.
+  const addLineToCart = (item, variant) => {
+    const key = variant ? `${item.id}:${variant.id}` : item.id;
+    const name = variant ? `${item.name} (${variant.name})` : item.name;
+    const price = Number(item.price) + (variant ? Number(variant.price_delta || 0) : 0);
+
     setCart((prev) => {
-      const existing = prev.find((c) => c.menu_item_id === item.id);
-      if (existing)
+      const existing = prev.find((c) => c.key === key);
+      if (existing) {
         return prev.map((c) =>
-          c.menu_item_id === item.id ? { ...c, quantity: c.quantity + 1 } : c,
+          c.key === key ? { ...c, quantity: c.quantity + 1 } : c,
         );
+      }
       return [
         {
+          key,
           menu_item_id: item.id,
-          name: item.name,
-          price: Number(item.price),
+          variant_id: variant?.id || null,
+          name,
+          price,
           quantity: 1,
           notes: "",
           requires_kitchen: item.requires_kitchen !== false,
@@ -147,13 +178,14 @@ export default function OrderTaking() {
         ...prev,
       ];
     });
+    setVariantPickerItem(null);
   };
 
-  const updateQty = (menuItemId, delta) => {
+  const updateQty = (key, delta) => {
     setCart((prev) =>
       prev
         .map((c) => {
-          if (c.menu_item_id !== menuItemId) return c;
+          if (c.key !== key) return c;
           const q = Math.max(0, c.quantity + delta);
           return { ...c, quantity: q };
         })
@@ -161,9 +193,9 @@ export default function OrderTaking() {
     );
   };
 
-  const setNotes = (menuItemId, notes) => {
+  const setNotes = (key, notes) => {
     setCart((prev) =>
-      prev.map((c) => (c.menu_item_id === menuItemId ? { ...c, notes } : c)),
+      prev.map((c) => (c.key === key ? { ...c, notes } : c)),
     );
   };
 
@@ -443,37 +475,45 @@ export default function OrderTaking() {
               </p>
             ) : (
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 max-h-[calc(100vh-320px)] min-h-[320px] overflow-y-auto pr-1">
-                {visibleItems.map((item) => (
-                  <button
-                    key={item.id}
-                    onClick={() => addToCart(item)}
-                    className="text-left p-3 rounded-lg border border-stone-200 hover:border-brand-400 hover:bg-brand-50/50 transition-colors active:scale-[0.98]"
-                  >
-                    {item.photo_url && (
-                      <img
-                        src={item.photo_url}
-                        alt={item.name}
-                        className="w-full h-20 object-cover rounded-md mb-2"
-                        loading="lazy"
-                      />
-                    )}
-                    <div className="flex justify-between items-start gap-2">
-                      <span className="font-medium text-stone-800 text-sm leading-tight">
-                        {item.name}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between mt-1">
-                      <span className="text-brand-700 text-sm font-semibold whitespace-nowrap">
-                        {formatMoney(item.price)}
-                      </span>
-                      <span
-                        className={`shrink-0 text-[10px] font-medium rounded px-1.5 py-0.5 ${item.requires_kitchen !== false ? "bg-amber-100 text-amber-700" : "bg-emerald-100 text-emerald-700"}`}
-                      >
-                        {item.requires_kitchen !== false ? "Kitchen" : "Ready"}
-                      </span>
-                    </div>
-                  </button>
-                ))}
+                {visibleItems.map((item) => {
+                  const hasVariants = item.variants && item.variants.length > 0;
+                  return (
+                    <button
+                      key={item.id}
+                      onClick={() => handleItemTap(item)}
+                      className="text-left p-3 rounded-lg border border-stone-200 hover:border-brand-400 hover:bg-brand-50/50 transition-colors active:scale-[0.98]"
+                    >
+                      {item.photo_url && (
+                        <img
+                          src={item.photo_url}
+                          alt={item.name}
+                          className="w-full h-20 object-cover rounded-md mb-2"
+                          loading="lazy"
+                        />
+                      )}
+                      <div className="flex justify-between items-start gap-2">
+                        <span className="font-medium text-stone-800 text-sm leading-tight">
+                          {item.name}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between mt-1">
+                        <span className="text-brand-700 text-sm font-semibold whitespace-nowrap">
+                          {hasVariants ? `From ${formatMoney(item.price)}` : formatMoney(item.price)}
+                        </span>
+                        <span
+                          className={`shrink-0 text-[10px] font-medium rounded px-1.5 py-0.5 ${item.requires_kitchen !== false ? "bg-amber-100 text-amber-700" : "bg-emerald-100 text-emerald-700"}`}
+                        >
+                          {item.requires_kitchen !== false ? "Kitchen" : "Ready"}
+                        </span>
+                      </div>
+                      {hasVariants && (
+                        <div className="mt-1 text-[11px] font-medium text-blue-600">
+                          {item.variants.length} option{item.variants.length === 1 ? "" : "s"} — tap to choose
+                        </div>
+                      )}
+                    </button>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -500,7 +540,7 @@ export default function OrderTaking() {
               <ul className="space-y-3 mb-4 max-h-[calc(100vh-380px)] overflow-y-auto pr-1">
                 {cart.map((c) => (
                   <li
-                    key={c.menu_item_id}
+                    key={c.key}
                     className="border border-stone-100 rounded-lg p-3"
                   >
                     <div className="flex items-center justify-between mb-1 gap-2">
@@ -513,7 +553,7 @@ export default function OrderTaking() {
                     </div>
                     <div className="flex items-center gap-2 mb-2">
                       <button
-                        onClick={() => updateQty(c.menu_item_id, -1)}
+                        onClick={() => updateQty(c.key, -1)}
                         className="w-8 h-8 rounded-md border border-stone-300 text-stone-600 hover:bg-stone-50 text-lg leading-none"
                       >
                         −
@@ -522,7 +562,7 @@ export default function OrderTaking() {
                         {c.quantity}
                       </span>
                       <button
-                        onClick={() => updateQty(c.menu_item_id, 1)}
+                        onClick={() => updateQty(c.key, 1)}
                         className="w-8 h-8 rounded-md border border-stone-300 text-stone-600 hover:bg-stone-50 text-lg leading-none"
                       >
                         +
@@ -533,7 +573,7 @@ export default function OrderTaking() {
                     </div>
                     <input
                       value={c.notes}
-                      onChange={(e) => setNotes(c.menu_item_id, e.target.value)}
+                      onChange={(e) => setNotes(c.key, e.target.value)}
                       placeholder="Notes (e.g. no onions)"
                       className="w-full px-2.5 py-1.5 rounded-md border border-stone-200 text-xs focus:outline-none focus:ring-2 focus:ring-brand-500"
                     />
@@ -579,6 +619,28 @@ export default function OrderTaking() {
           </div>
         </div>
       </div>
+
+      {/* Variant picker */}
+      <Modal
+        open={!!variantPickerItem}
+        onClose={() => setVariantPickerItem(null)}
+        title={variantPickerItem ? `Choose an option — ${variantPickerItem.name}` : "Choose an option"}
+      >
+        <div className="space-y-2">
+          {variantPickerItem?.variants.map((v) => (
+            <button
+              key={v.id}
+              onClick={() => addLineToCart(variantPickerItem, v)}
+              className="w-full flex items-center justify-between px-4 py-3 rounded-lg border border-stone-200 hover:border-brand-400 hover:bg-brand-50/50 transition-colors text-left"
+            >
+              <span className="font-medium text-stone-800">{v.name}</span>
+              <span className="text-sm font-semibold text-brand-700">
+                {formatMoney(Number(variantPickerItem.price) + Number(v.price_delta || 0))}
+              </span>
+            </button>
+          ))}
+        </div>
+      </Modal>
     </div>
   );
 }

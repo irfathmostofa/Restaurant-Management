@@ -1,25 +1,27 @@
-import { useState } from 'react'
-import { useMenuData } from '../../context/MenuDataContext'
-import { usePublicSite } from '../../context/PublicSiteContext'
-import { useCurrency } from '../../context/CurrencyContext'
+import { useState } from "react";
+import { useMenuData } from "../../context/MenuDataContext";
+import { usePublicSite } from "../../context/PublicSiteContext";
+import { useCurrency } from "../../context/CurrencyContext";
 
 export default function MenuSection() {
-  const { categories, items, loading, error } = useMenuData()
-  const { selectedBranch } = usePublicSite()
-  const { formatMoney } = useCurrency()
-  const [activeCat, setActiveCat] = useState(null)
-
-  if (!selectedBranch) return null
+  const { categories, items, loading, error } = useMenuData();
+  const { selectedBranch } = usePublicSite();
+  const { formatMoney } = useCurrency();
+  const [activeCat, setActiveCat] = useState(null);
+  const [selectedItem, setSelectedItem] = useState(null);
+  if (!selectedBranch) return null;
 
   const grouped = categories.map((cat) => ({
     ...cat,
-    items: items.filter((i) => i.category_id === cat.id)
-  }))
+    items: items.filter((i) => i.category_id === cat.id),
+  }));
 
   const handleCatClick = (catId) => {
-    setActiveCat(catId)
-    document.getElementById(`menu-${catId}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  }
+    setActiveCat(catId);
+    document
+      .getElementById(`menu-${catId}`)
+      ?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
 
   return (
     <section id="menu" className="py-14 bg-stone-50">
@@ -27,15 +29,28 @@ export default function MenuSection() {
         <div className="flex items-end justify-between mb-6">
           <div>
             <h2 className="text-3xl font-bold text-stone-900">Our Menu</h2>
-            <p className="text-stone-500 mt-1">From the kitchen of <span className="font-medium text-stone-700">{selectedBranch.name}</span></p>
+            <p className="text-stone-500 mt-1">
+              From the kitchen of{" "}
+              <span className="font-medium text-stone-700">
+                {selectedBranch.name}
+              </span>
+            </p>
           </div>
         </div>
 
         {/* Category chips */}
-        <div className="flex gap-2 overflow-x-auto pb-3 mb-8" style={{ scrollbarWidth: 'thin' }}>
+        <div
+          className="flex gap-2 overflow-x-auto pb-3 mb-8"
+          style={{ scrollbarWidth: "thin" }}
+        >
           <button
-            onClick={() => { setActiveCat(null); document.getElementById('menu')?.scrollIntoView({ behavior: 'smooth' }) }}
-            className={`shrink-0 px-4 py-2 rounded-full text-sm font-medium border transition-colors ${activeCat === null ? 'bg-brand-600 text-white border-brand-600' : 'bg-white text-stone-600 border-stone-300 hover:border-brand-400'}`}
+            onClick={() => {
+              setActiveCat(null);
+              document
+                .getElementById("menu")
+                ?.scrollIntoView({ behavior: "smooth" });
+            }}
+            className={`shrink-0 px-4 py-2 rounded-full text-sm font-medium border transition-colors ${activeCat === null ? "bg-brand-600 text-white border-brand-600" : "bg-white text-stone-600 border-stone-300 hover:border-brand-400"}`}
           >
             All
           </button>
@@ -43,7 +58,7 @@ export default function MenuSection() {
             <button
               key={cat.id}
               onClick={() => handleCatClick(cat.id)}
-              className={`shrink-0 px-4 py-2 rounded-full text-sm font-medium border transition-colors ${activeCat === cat.id ? 'bg-brand-600 text-white border-brand-600' : 'bg-white text-stone-600 border-stone-300 hover:border-brand-400'}`}
+              className={`shrink-0 px-4 py-2 rounded-full text-sm font-medium border transition-colors ${activeCat === cat.id ? "bg-brand-600 text-white border-brand-600" : "bg-white text-stone-600 border-stone-300 hover:border-brand-400"}`}
             >
               {cat.name}
             </button>
@@ -58,24 +73,50 @@ export default function MenuSection() {
           <div className="space-y-10">
             {grouped.map((cat) => (
               <div key={cat.id} id={`menu-${cat.id}`} className="scroll-mt-24">
-                <h3 className="text-xl font-semibold text-stone-800 mb-4 border-b-2 border-brand-200 pb-2">{cat.name}</h3>
+                <h3 className="text-xl font-semibold text-stone-800 mb-4 border-b-2 border-brand-200 pb-2">
+                  {cat.name}
+                </h3>
                 {cat.items.length === 0 ? (
-                  <p className="text-sm text-stone-400 italic">No items in this category yet.</p>
+                  <p className="text-sm text-stone-400 italic">
+                    No items in this category yet.
+                  </p>
                 ) : (
                   <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
                     {cat.items.map((item) => (
-                      <article key={item.id} className={`bg-white rounded-xl border border-stone-200 overflow-hidden flex ${item.is_available ? '' : 'opacity-60'}`}>
+                      <article
+                        key={item.id}
+                        onClick={() => setSelectedItem(item)}
+                        className={`bg-white rounded-xl border border-stone-200 cursor-pointer overflow-hidden flex ${item.is_available ? "" : "opacity-60"}`}
+                      >
                         <div className="w-24 h-24 shrink-0 bg-stone-100 flex items-center justify-center text-3xl">
-                          {item.photo_url ? <img src={item.photo_url} alt={item.name} className="w-full h-full object-cover" /> : <span>&#127869;</span>}
+                          {item.photo_url ? (
+                            <img
+                              src={item.photo_url}
+                              alt={item.name}
+                              className="w-full h-full object-cover"
+                            />
+                          ) : (
+                            <span>&#127869;</span>
+                          )}
                         </div>
-                        <div className="p-4 flex-1">
+                        <div className="p-3 flex-1">
                           <div className="flex items-start justify-between gap-2">
-                            <h4 className="font-semibold text-stone-900">{item.name}</h4>
-                            <span className="font-semibold text-brand-700 whitespace-nowrap">{formatMoney(item.price)}</span>
+                            <h4 className="font-semibold text-stone-900">
+                              {item.name}
+                            </h4>
+                            <span className="font-semibold text-brand-700 whitespace-nowrap">
+                              {formatMoney(item.price)}
+                            </span>
                           </div>
-                          {item.description && <p className="text-sm text-stone-500 mt-1 line-clamp-2">{item.description}</p>}
+                          {item.description && (
+                            <p className="text-sm text-stone-500 mt-1 line-clamp-2">
+                              {item.description}
+                            </p>
+                          )}
                           {!item.is_available && (
-                            <span className="inline-block mt-2 text-xs font-medium bg-stone-200 text-stone-600 rounded-full px-2 py-0.5">Sold out</span>
+                            <span className="inline-block mt-2 text-xs font-medium bg-stone-200 text-stone-600 rounded-full px-2 py-0.5">
+                              Sold out
+                            </span>
                           )}
                         </div>
                       </article>
@@ -87,6 +128,49 @@ export default function MenuSection() {
           </div>
         )}
       </div>
+      {selectedItem && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-black/50"
+            onClick={() => setSelectedItem(null)}
+          />
+          <div className="relative bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+            {selectedItem.photo_url && (
+              <img
+                src={selectedItem.photo_url}
+                alt={selectedItem.name}
+                className="w-full h-56 object-cover"
+              />
+            )}
+            <div className="p-5">
+              <div className="flex items-start justify-between gap-3 mb-2">
+                <h3 className="text-xl font-bold text-stone-900">
+                  {selectedItem.name}
+                </h3>
+                <span className="text-lg font-bold text-brand-700 whitespace-nowrap">
+                  {formatMoney(selectedItem.price)}
+                </span>
+              </div>
+              {selectedItem.description && (
+                <p className="text-stone-600 whitespace-pre-line">
+                  {selectedItem.description}
+                </p>
+              )}
+              {!selectedItem.is_available && (
+                <span className="inline-block mt-3 text-xs font-medium bg-stone-200 text-stone-600 rounded-full px-2 py-0.5">
+                  Sold out
+                </span>
+              )}
+              <button
+                onClick={() => setSelectedItem(null)}
+                className="mt-5 w-full px-4 py-2 rounded-lg border border-stone-300 text-sm font-medium text-stone-600 hover:bg-stone-50"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
-  )
+  );
 }

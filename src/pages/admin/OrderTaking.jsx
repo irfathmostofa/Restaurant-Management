@@ -18,7 +18,7 @@ export default function OrderTaking() {
   const { formatMoney } = useCurrency();
   const navigate = useNavigate();
   const [tables, setTables] = useState([]);
-  const [menuItems, setMenuItems] = useState([]); // merged: menu_items + this branch's availability + variants
+  const [menuItems, setMenuItems] = useState([]);
   const [categories, setCategories] = useState([]);
   const [activeCategory, setActiveCategory] = useState("all");
   const [search, setSearch] = useState("");
@@ -27,11 +27,10 @@ export default function OrderTaking() {
   const [selectedTable, setSelectedTable] = useState(null);
   const [customerName, setCustomerName] = useState("");
   const [orderNotes, setOrderNotes] = useState("");
-  // cart line: { key, menu_item_id, variant_id, name, price, quantity, notes, requires_kitchen }
   const [cart, setCart] = useState([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
-  const [variantPickerItem, setVariantPickerItem] = useState(null); // item awaiting a variant choice
+  const [variantPickerItem, setVariantPickerItem] = useState(null);
   const searchRef = useRef(null);
   const { notifications, dismiss } = useOrderReadyNotifications(activeBranchId);
 
@@ -45,13 +44,11 @@ export default function OrderTaking() {
         .select("*")
         .eq("branch_id", activeBranchId)
         .order("number"),
-      // menu_items/categories are GLOBAL now. What's actually orderable at
-      // THIS branch comes from branch_menu_items — join through it so we
-      // get each item plus this branch's own is_available flag, plus its
-      // variants (size/option choices) in the same round trip.
       supabase
         .from("branch_menu_items")
-        .select("is_available, menu_item_id, menu_items(*, menu_item_variants(*))")
+        .select(
+          "is_available, menu_item_id, menu_items(*, menu_item_variants(*))",
+        )
         .eq("branch_id", activeBranchId),
       supabase.from("categories").select("*").order("sort_order"),
     ]).then(([tablesRes, bmiRes, catRes]) => {
@@ -59,15 +56,15 @@ export default function OrderTaking() {
       if (!tablesRes.error) setTables(tablesRes.data || []);
       if (!bmiRes.error) {
         const merged = (bmiRes.data || [])
-          .filter((row) => row.menu_items) // guard against a dangling row if an item was deleted
+          .filter((row) => row.menu_items)
           .map((row) => {
             const { menu_item_variants, ...item } = row.menu_items;
             return {
               ...item,
               branch_available: row.is_available,
-              variants: (menu_item_variants || []).slice().sort(
-                (a, b) => (a.sort_order || 0) - (b.sort_order || 0),
-              ),
+              variants: (menu_item_variants || [])
+                .slice()
+                .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0)),
             };
           })
           .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
@@ -81,13 +78,10 @@ export default function OrderTaking() {
     };
   }, [activeBranchId]);
 
-  // Keyboard shortcuts: "/" focuses search, Enter submits a ready cart.
   useEffect(() => {
     const onKey = (e) => {
       const tag = e.target?.tagName?.toLowerCase();
       if (e.key === "Enter") {
-        // Enter submits the order unless the user is editing a multi-line
-        // field. Prevents accidental submits while typing line notes.
         if (tag === "textarea" || tag === "select") return;
         if (e.shiftKey || e.metaKey || e.ctrlKey || e.altKey) return;
         if (canSubmitRef.current) {
@@ -109,7 +103,6 @@ export default function OrderTaking() {
   const visibleItems = useMemo(() => {
     const q = search.trim().toLowerCase();
     return menuItems.filter((i) => {
-      // Both flags must be true: globally active AND enabled at this branch.
       if (!i.is_available) return false;
       if (!i.branch_available) return false;
       if (activeCategory !== "all" && i.category_id !== activeCategory)
@@ -119,7 +112,6 @@ export default function OrderTaking() {
     });
   }, [menuItems, activeCategory, search]);
 
-  // Only show category chips that actually have items on this branch's menu.
   const categoriesWithItems = useMemo(() => {
     const activeIds = new Set(
       menuItems
@@ -129,8 +121,6 @@ export default function OrderTaking() {
     return categories.filter((c) => activeIds.has(c.id));
   }, [categories, menuItems]);
 
-  // Hold the latest submit handler + cart state in refs so the keyboard
-  // listener below never sees stale closures.
   const submitRef = useRef(null);
   const canSubmitRef = useRef(false);
 
@@ -138,32 +128,23 @@ export default function OrderTaking() {
     return <p className="text-stone-500">Select a branch to take orders.</p>;
   }
 
-  // Tapping a tile: items with variants need a size/option choice first;
-  // items without variants add straight to the cart.
   const handleItemTap = (item) => {
-    if (item.variants && item.variants.length > 0) {
-      setVariantPickerItem(item);
-    } else {
-      addLineToCart(item, null);
-    }
+    if (item.variants && item.variants.length > 0) setVariantPickerItem(item);
+    else addLineToCart(item, null);
   };
 
-  // order_items has no variant_id column — variants are baked into the
-  // denormalized `name`/`price_at_order` snapshot, same as everything else
-  // on that table. `key` is client-side only, used to keep each variant
-  // as its own cart line.
   const addLineToCart = (item, variant) => {
     const key = variant ? `${item.id}:${variant.id}` : item.id;
     const name = variant ? `${item.name} (${variant.name})` : item.name;
-    const price = Number(item.price) + (variant ? Number(variant.price_delta || 0) : 0);
+    const price =
+      Number(item.price) + (variant ? Number(variant.price_delta || 0) : 0);
 
     setCart((prev) => {
       const existing = prev.find((c) => c.key === key);
-      if (existing) {
+      if (existing)
         return prev.map((c) =>
           c.key === key ? { ...c, quantity: c.quantity + 1 } : c,
         );
-      }
       return [
         {
           key,
@@ -181,26 +162,33 @@ export default function OrderTaking() {
     setVariantPickerItem(null);
   };
 
+  // Total units of a base item currently in the cart, across all its variants.
+  const cartCountForItem = (itemId) =>
+    cart
+      .filter((c) => c.menu_item_id === itemId)
+      .reduce((s, c) => s + c.quantity, 0);
+
   const updateQty = (key, delta) => {
     setCart((prev) =>
       prev
-        .map((c) => {
-          if (c.key !== key) return c;
-          const q = Math.max(0, c.quantity + delta);
-          return { ...c, quantity: q };
-        })
+        .map((c) =>
+          c.key === key
+            ? { ...c, quantity: Math.max(0, c.quantity + delta) }
+            : c,
+        )
         .filter((c) => c.quantity > 0),
     );
   };
 
-  const setNotes = (key, notes) => {
-    setCart((prev) =>
-      prev.map((c) => (c.key === key ? { ...c, notes } : c)),
-    );
-  };
+  const setNotes = (key, notes) =>
+    setCart((prev) => prev.map((c) => (c.key === key ? { ...c, notes } : c)));
 
+  const totalQty = cart.reduce((s, c) => s + c.quantity, 0);
   const total = cart.reduce((s, c) => s + c.price * c.quantity, 0);
   const hasKitchenInCart = hasKitchenItems(cart);
+  const availableTables = tables.filter((t) => t.status !== "occupied");
+  const occupiedCount = tables.filter((t) => t.status === "occupied").length;
+  const selectedTableInfo = tables.find((t) => t.id === selectedTable);
 
   const submitOrder = async () => {
     if (cart.length === 0) {
@@ -214,7 +202,6 @@ export default function OrderTaking() {
     setSubmitting(true);
     setError(null);
 
-    // Open the KOT print window synchronously so popup blockers don't block it.
     const kotWin = hasKitchenInCart ? openPrintWindow() : null;
 
     const { data: order, error: orderError } = await supabase
@@ -224,7 +211,6 @@ export default function OrderTaking() {
           branch_id: activeBranchId,
           table_id: orderType === "dine-in" ? selectedTable : null,
           type: orderType,
-          // Orders with only non-kitchen items are ready immediately.
           status: hasKitchenInCart ? "received" : "ready",
           staff_id: staff?.id || null,
           customer_name: customerName || null,
@@ -254,7 +240,6 @@ export default function OrderTaking() {
       notes: c.notes || null,
       price_at_order: c.price,
       requires_kitchen: c.requires_kitchen,
-      // Kitchen-required items queue for the kitchen; the rest are ready now.
       kitchen_status: c.requires_kitchen ? "pending" : "ready",
       estimated_prep_time: c.requires_kitchen
         ? Number(defaultPrepTime) || 5
@@ -264,7 +249,6 @@ export default function OrderTaking() {
       .from("order_items")
       .insert(itemsPayload);
     if (itemsError) {
-      // Roll back the empty order so we never leave an orphaned row behind.
       await supabase
         .from("orders")
         .delete()
@@ -290,7 +274,6 @@ export default function OrderTaking() {
         .eq("id", selectedTable);
     }
 
-    // Print the kitchen ticket (kitchen-required items only, no prices).
     if (kotWin) {
       const kitchenItems = cart.filter((c) => c.requires_kitchen);
       const tableNumber =
@@ -321,7 +304,6 @@ export default function OrderTaking() {
     });
 
     setSubmitting(false);
-    // Success → reset cart, navigate to billing to collect payment.
     setCart([]);
     setCustomerName("");
     setOrderNotes("");
@@ -329,7 +311,6 @@ export default function OrderTaking() {
     navigate("/admin/billing", { state: { newOrderId: order.id } });
   };
 
-  // Refresh refs each render so the global keyboard handler stays in sync.
   submitRef.current = submitOrder;
   canSubmitRef.current = cart.length > 0 && !submitting;
 
@@ -337,11 +318,7 @@ export default function OrderTaking() {
     <div>
       <PageHeader
         title="POS / Order Taking"
-        subtitle={
-          activeBranch
-            ? `Take an order at ${activeBranch.name}`
-            : "Select a branch"
-        }
+        subtitle={`Take an order at ${activeBranch.name}`}
       />
 
       {notifications.length > 0 && (
@@ -365,101 +342,96 @@ export default function OrderTaking() {
         </div>
       )}
 
-      <div className="flex flex-col xl:flex-row gap-6">
-        {/* Left: menu area */}
-        <div className="flex-1 min-w-0">
-          {/* Order type + customer + table (top bar) */}
-          <div className="bg-white rounded-xl border border-stone-200 p-4 mb-4">
-            <div className="flex flex-wrap items-center gap-3">
-              <div className="flex gap-2">
-                <button
-                  onClick={() => setOrderType("dine-in")}
-                  className={`px-4 py-2 rounded-lg text-sm font-medium border ${orderType === "dine-in" ? "bg-brand-600 text-white border-brand-600" : "bg-white text-stone-600 border-stone-300 hover:border-brand-400"}`}
-                >
-                  Dine-in
-                </button>
-                <button
-                  onClick={() => {
-                    setOrderType("takeaway");
-                    setSelectedTable(null);
-                  }}
-                  className={`px-4 py-2 rounded-lg text-sm font-medium border ${orderType === "takeaway" ? "bg-brand-600 text-white border-brand-600" : "bg-white text-stone-600 border-stone-300 hover:border-brand-400"}`}
-                >
-                  Takeaway
-                </button>
-              </div>
-
-              {orderType === "dine-in" && (
-                <div className="flex flex-wrap gap-2">
-                  {tables
-                    .filter((t) => t.status !== "occupied")
-                    .map((t) => (
-                      <button
-                        key={t.id}
-                        onClick={() => setSelectedTable(t.id)}
-                        className={`w-10 h-10 rounded-lg border text-sm font-semibold transition-colors ${selectedTable === t.id ? "bg-brand-600 text-white border-brand-600" : "bg-white text-stone-700 border-stone-300 hover:border-brand-400"}`}
-                      >
-                        {t.number}
-                      </button>
-                    ))}
-                  {tables.filter((t) => t.status === "occupied").length > 0 && (
-                    <span className="text-xs text-stone-400 self-center">
-                      {tables.filter((t) => t.status === "occupied").length}{" "}
-                      occupied
-                    </span>
-                  )}
-                </div>
-              )}
-
-              <div className="flex-1 min-w-[180px]">
-                <input
-                  value={customerName}
-                  onChange={(e) => setCustomerName(e.target.value)}
-                  placeholder="Customer name (optional)"
-                  className="w-full px-3 py-2 rounded-lg border border-stone-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
-                />
-              </div>
-
-              <div className="flex-1 min-w-[200px]">
-                <input
-                  value={orderNotes}
-                  onChange={(e) => setOrderNotes(e.target.value)}
-                  placeholder="Order notes (optional)"
-                  className="w-full px-3 py-2 rounded-lg border border-stone-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
-                />
-              </div>
-            </div>
+      {/* Order context bar */}
+      <div className="bg-white rounded-xl border border-stone-200 p-4 mb-4">
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex rounded-lg border border-stone-300 overflow-hidden shrink-0">
+            <button
+              onClick={() => setOrderType("dine-in")}
+              className={`px-4 py-2 text-sm font-semibold transition-colors ${orderType === "dine-in" ? "bg-brand-600 text-white" : "bg-white text-stone-600 hover:bg-stone-50"}`}
+            >
+              🍽 Dine-in
+            </button>
+            <button
+              onClick={() => {
+                setOrderType("takeaway");
+                setSelectedTable(null);
+              }}
+              className={`px-4 py-2 text-sm font-semibold transition-colors ${orderType === "takeaway" ? "bg-brand-600 text-white" : "bg-white text-stone-600 hover:bg-stone-50"}`}
+            >
+              🥡 Takeaway
+            </button>
           </div>
 
-          {/* Search + categories */}
-          <div className="bg-white rounded-xl border border-stone-200 p-4 mb-4">
-            <input
-              ref={searchRef}
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder='Search menu… (press "/")'
-              className="w-full px-3 py-2.5 rounded-lg border border-stone-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 mb-3"
-            />
-            <div className="flex gap-2 overflow-x-auto pb-1 -mb-1">
-              <button
-                onClick={() => setActiveCategory("all")}
-                className={`shrink-0 px-3 py-1.5 rounded-full text-sm font-medium border ${activeCategory === "all" ? "bg-brand-600 text-white border-brand-600" : "bg-white text-stone-600 border-stone-300 hover:border-brand-400"}`}
+          {orderType === "dine-in" && (
+            <div className="shrink-0">
+              <select
+                value={selectedTable ?? ""}
+                onChange={(e) => setSelectedTable(e.target.value || null)}
+                className={`px-3 py-2 rounded-lg border text-sm font-medium bg-white focus:outline-none focus:ring-2 focus:ring-brand-500 ${!selectedTable ? "border-amber-300 text-amber-700" : "border-stone-300 text-stone-800"}`}
               >
-                All
-              </button>
-              {categoriesWithItems.map((cat) => (
-                <button
-                  key={cat.id}
-                  onClick={() => setActiveCategory(cat.id)}
-                  className={`shrink-0 px-3 py-1.5 rounded-full text-sm font-medium border ${activeCategory === cat.id ? "bg-brand-600 text-white border-brand-600" : "bg-white text-stone-600 border-stone-300 hover:border-brand-400"}`}
-                >
-                  {cat.name}
-                </button>
-              ))}
+                <option value="">Select table…</option>
+                {availableTables.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    Table {t.number} · seats {t.capacity}
+                  </option>
+                ))}
+              </select>
+              {occupiedCount > 0 && (
+                <span className="ml-2 text-xs text-stone-400">
+                  {occupiedCount} occupied
+                </span>
+              )}
             </div>
-          </div>
+          )}
 
-          {/* Product grid */}
+          <input
+            value={customerName}
+            onChange={(e) => setCustomerName(e.target.value)}
+            placeholder="Customer name (optional)"
+            className="flex-1 min-w-[160px] px-3 py-2 rounded-lg border border-stone-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+          />
+          <input
+            value={orderNotes}
+            onChange={(e) => setOrderNotes(e.target.value)}
+            placeholder="Order notes (optional)"
+            className="flex-1 min-w-[180px] px-3 py-2 rounded-lg border border-stone-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+          />
+        </div>
+      </div>
+      <div className="mb-2">
+        <div className="flex items-center gap-2 bg-white rounded-xl border border-stone-200 p-3 xl:sticky xl:top-24">
+          <input
+            ref={searchRef}
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder='Search… "/"'
+            className="w-50 m-0 px-3 py-2 rounded-lg border border-stone-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+          />
+          <div className="">
+            <button
+              onClick={() => setActiveCategory("all")}
+              className={`shrink-0 text-left px-3 py-2 rounded-lg text-sm font-medium transition-colors ${activeCategory === "all" ? "bg-brand-600 text-white" : "text-stone-600 hover:bg-stone-100"}`}
+            >
+              All items
+            </button>
+            {categoriesWithItems.map((cat) => (
+              <button
+                key={cat.id}
+                onClick={() => setActiveCategory(cat.id)}
+                className={`shrink-0 text-left px-3 py-2 rounded-lg text-sm font-medium transition-colors ${activeCategory === cat.id ? "bg-brand-600 text-white" : "text-stone-600 hover:bg-stone-100"}`}
+              >
+                {cat.name}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+      <div className="flex flex-col xl:flex-row gap-4">
+        {/* Category sidebar */}
+
+        {/* Product grid */}
+        <div className="flex-1 min-w-0">
           <div className="bg-white rounded-xl border border-stone-200 p-4">
             {loading ? (
               <p className="text-stone-500 py-10 text-center">Loading menu…</p>
@@ -474,43 +446,58 @@ export default function OrderTaking() {
                 </Link>
               </p>
             ) : (
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 max-h-[calc(100vh-320px)] min-h-[320px] overflow-y-auto pr-1">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 max-h-[calc(100vh-360px)] min-h-[320px] overflow-y-auto pr-1">
                 {visibleItems.map((item) => {
                   const hasVariants = item.variants && item.variants.length > 0;
+                  const inCartQty = cartCountForItem(item.id);
                   return (
                     <button
                       key={item.id}
                       onClick={() => handleItemTap(item)}
-                      className="text-left p-3 rounded-lg border border-stone-200 hover:border-brand-400 hover:bg-brand-50/50 transition-colors active:scale-[0.98]"
+                      className="relative text-left rounded-xl border-2 border-stone-200 hover:border-brand-500 bg-white hover:shadow-md transition-all active:scale-[0.97] overflow-hidden"
                     >
-                      {item.photo_url && (
-                        <img
-                          src={item.photo_url}
-                          alt={item.name}
-                          className="w-full h-20 object-cover rounded-md mb-2"
-                          loading="lazy"
-                        />
+                      {inCartQty > 0 && (
+                        <span className="absolute top-2 right-2 z-10 min-w-[22px] h-[22px] px-1 flex items-center justify-center rounded-full bg-brand-600 text-white text-xs font-bold shadow">
+                          {inCartQty}
+                        </span>
                       )}
-                      <div className="flex justify-between items-start gap-2">
-                        <span className="font-medium text-stone-800 text-sm leading-tight">
+                      <div className="h-20 bg-stone-100 flex items-center justify-center">
+                        {item.photo_url ? (
+                          <img
+                            src={item.photo_url}
+                            alt={item.name}
+                            className="w-full h-full object-cover"
+                            loading="lazy"
+                          />
+                        ) : (
+                          <span className="text-2xl text-stone-300">🍽</span>
+                        )}
+                      </div>
+                      <div className="p-2.5">
+                        <div className="font-semibold text-stone-800 text-sm leading-tight line-clamp-2 mb-1">
                           {item.name}
-                        </span>
-                      </div>
-                      <div className="flex items-center justify-between mt-1">
-                        <span className="text-brand-700 text-sm font-semibold whitespace-nowrap">
-                          {hasVariants ? `From ${formatMoney(item.price)}` : formatMoney(item.price)}
-                        </span>
-                        <span
-                          className={`shrink-0 text-[10px] font-medium rounded px-1.5 py-0.5 ${item.requires_kitchen !== false ? "bg-amber-100 text-amber-700" : "bg-emerald-100 text-emerald-700"}`}
-                        >
-                          {item.requires_kitchen !== false ? "Kitchen" : "Ready"}
-                        </span>
-                      </div>
-                      {hasVariants && (
-                        <div className="mt-1 text-[11px] font-medium text-blue-600">
-                          {item.variants.length} option{item.variants.length === 1 ? "" : "s"} — tap to choose
                         </div>
-                      )}
+                        <div className="flex items-center justify-between">
+                          <span className="text-brand-700 text-sm font-bold whitespace-nowrap">
+                            {hasVariants
+                              ? `From ${formatMoney(item.price)}`
+                              : formatMoney(item.price)}
+                          </span>
+                          <span
+                            className={`shrink-0 text-[9px] font-bold uppercase tracking-wide rounded px-1.5 py-0.5 ${item.requires_kitchen !== false ? "bg-amber-100 text-amber-700" : "bg-emerald-100 text-emerald-700"}`}
+                          >
+                            {item.requires_kitchen !== false
+                              ? "Kitchen"
+                              : "Ready"}
+                          </span>
+                        </div>
+                        {hasVariants && (
+                          <div className="mt-1 text-[10px] font-medium text-blue-600">
+                            {item.variants.length} option
+                            {item.variants.length === 1 ? "" : "s"} →
+                          </div>
+                        )}
+                      </div>
                     </button>
                   );
                 })}
@@ -519,102 +506,106 @@ export default function OrderTaking() {
           </div>
         </div>
 
-        {/* Right: cart */}
+        {/* Cart / receipt panel */}
         <div className="w-full xl:w-[380px] shrink-0">
-          <div className="bg-white rounded-xl border border-stone-200 p-5 xl:sticky xl:top-24">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="font-semibold text-stone-900">Current order</h2>
-              <span className="text-xs font-medium rounded-full bg-stone-100 text-stone-600 px-2.5 py-0.5 capitalize">
-                {orderType}
-                {selectedTable
-                  ? ` · T${tables.find((t) => t.id === selectedTable)?.number}`
-                  : ""}
+          <div
+            className="bg-stone-900 text-white rounded-xl overflow-hidden xl:sticky xl:top-24 flex flex-col"
+            style={{ maxHeight: "calc(100vh - 96px)" }}
+          >
+            <div className="px-5 py-4 border-b border-stone-700 flex items-center justify-between">
+              <div>
+                <h2 className="font-bold">Current order</h2>
+                <span className="text-xs text-stone-400 capitalize">
+                  {orderType === "dine-in"
+                    ? selectedTableInfo
+                      ? `Table ${selectedTableInfo.number}`
+                      : "No table selected"
+                    : "Takeaway"}
+                </span>
+              </div>
+              <span className="text-xs font-semibold rounded-full bg-stone-700 px-2.5 py-1">
+                {totalQty} item{totalQty === 1 ? "" : "s"}
               </span>
             </div>
 
-            {cart.length === 0 ? (
-              <p className="text-sm text-stone-400 text-center py-8">
-                Tap items on the left to add them.
-              </p>
-            ) : (
-              <ul className="space-y-3 mb-4 max-h-[calc(100vh-380px)] overflow-y-auto pr-1">
-                {cart.map((c) => (
-                  <li
-                    key={c.key}
-                    className="border border-stone-100 rounded-lg p-3"
-                  >
-                    <div className="flex items-center justify-between mb-1 gap-2">
-                      <span className="font-medium text-sm text-stone-800">
-                        {c.name}
-                      </span>
-                      <span className="text-sm font-semibold text-stone-900 whitespace-nowrap">
-                        {formatMoney(c.price * c.quantity)}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2 mb-2">
-                      <button
-                        onClick={() => updateQty(c.key, -1)}
-                        className="w-8 h-8 rounded-md border border-stone-300 text-stone-600 hover:bg-stone-50 text-lg leading-none"
-                      >
-                        −
-                      </button>
-                      <span className="w-8 text-center text-sm font-medium">
-                        {c.quantity}
-                      </span>
-                      <button
-                        onClick={() => updateQty(c.key, 1)}
-                        className="w-8 h-8 rounded-md border border-stone-300 text-stone-600 hover:bg-stone-50 text-lg leading-none"
-                      >
-                        +
-                      </button>
-                      <span className="ml-auto text-xs text-stone-400">
-                        {formatMoney(c.price)} each
-                      </span>
-                    </div>
-                    <input
-                      value={c.notes}
-                      onChange={(e) => setNotes(c.key, e.target.value)}
-                      placeholder="Notes (e.g. no onions)"
-                      className="w-full px-2.5 py-1.5 rounded-md border border-stone-200 text-xs focus:outline-none focus:ring-2 focus:ring-brand-500"
-                    />
-                  </li>
-                ))}
-              </ul>
-            )}
-
-            {error && <p className="text-sm text-red-600 mb-3">{error}</p>}
-
-            <div className="flex items-center justify-between border-t border-stone-200 pt-4 mb-4">
-              <span className="font-medium text-stone-700">Total</span>
-              <span className="text-xl font-bold text-stone-900">
-                {formatMoney(total)}
-              </span>
+            <div className="flex-1 overflow-y-auto px-5 py-3">
+              {cart.length === 0 ? (
+                <p className="text-sm text-stone-400 text-center py-10">
+                  Tap items on the left to add them.
+                </p>
+              ) : (
+                <ul className="space-y-2.5">
+                  {cart.map((c) => (
+                    <li key={c.key} className="bg-stone-800 rounded-lg p-3">
+                      <div className="flex items-center justify-between mb-1.5 gap-2">
+                        <span className="font-medium text-sm">{c.name}</span>
+                        <span className="text-sm font-bold whitespace-nowrap">
+                          {formatMoney(c.price * c.quantity)}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2 mb-2">
+                        <button
+                          onClick={() => updateQty(c.key, -1)}
+                          className="w-7 h-7 rounded-md bg-stone-700 hover:bg-stone-600 text-lg leading-none"
+                        >
+                          −
+                        </button>
+                        <span className="w-6 text-center text-sm font-semibold">
+                          {c.quantity}
+                        </span>
+                        <button
+                          onClick={() => updateQty(c.key, 1)}
+                          className="w-7 h-7 rounded-md bg-stone-700 hover:bg-stone-600 text-lg leading-none"
+                        >
+                          +
+                        </button>
+                        <span className="ml-auto text-xs text-stone-400">
+                          {formatMoney(c.price)} each
+                        </span>
+                      </div>
+                      <input
+                        value={c.notes}
+                        onChange={(e) => setNotes(c.key, e.target.value)}
+                        placeholder="Notes (e.g. no onions)"
+                        className="w-full px-2.5 py-1.5 rounded-md bg-stone-900 border border-stone-700 text-xs text-white placeholder-stone-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                      />
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
 
-            <button
-              onClick={submitOrder}
-              disabled={submitting || cart.length === 0}
-              className="w-full py-3 rounded-lg bg-brand-600 text-white font-semibold hover:bg-brand-700 disabled:opacity-50 transition-colors active:scale-[0.99]"
-            >
-              {submitting
-                ? "Placing order…"
-                : hasKitchenInCart
-                  ? "Send to kitchen"
-                  : "Place order"}
-            </button>
-            <div className="flex items-center justify-between mt-3 text-sm">
-              <Link
-                to="/admin/orders"
-                className="text-brand-600 hover:text-brand-700"
-              >
-                View order queue
-              </Link>
+            <div className="px-5 pt-3 pb-5 border-t border-stone-700">
+              {error && <p className="text-sm text-red-400 mb-3">{error}</p>}
+              <div className="flex items-center justify-between mb-4">
+                <span className="text-stone-300 font-medium">Total</span>
+                <span className="text-2xl font-bold">{formatMoney(total)}</span>
+              </div>
               <button
-                onClick={() => setCart([])}
-                className="text-stone-500 hover:text-stone-700"
+                onClick={submitOrder}
+                disabled={submitting || cart.length === 0}
+                className="w-full py-3.5 rounded-lg bg-brand-600 text-white font-bold hover:bg-brand-700 disabled:opacity-40 transition-colors active:scale-[0.99]"
               >
-                Clear cart
+                {submitting
+                  ? "Placing order…"
+                  : hasKitchenInCart
+                    ? "Send to kitchen"
+                    : "Place order"}
               </button>
+              <div className="flex items-center justify-between mt-3 text-sm">
+                <Link
+                  to="/admin/orders"
+                  className="text-brand-400 hover:text-brand-300"
+                >
+                  View order queue
+                </Link>
+                <button
+                  onClick={() => setCart([])}
+                  className="text-stone-400 hover:text-stone-200"
+                >
+                  Clear cart
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -624,7 +615,11 @@ export default function OrderTaking() {
       <Modal
         open={!!variantPickerItem}
         onClose={() => setVariantPickerItem(null)}
-        title={variantPickerItem ? `Choose an option — ${variantPickerItem.name}` : "Choose an option"}
+        title={
+          variantPickerItem
+            ? `Choose an option — ${variantPickerItem.name}`
+            : "Choose an option"
+        }
       >
         <div className="space-y-2">
           {variantPickerItem?.variants.map((v) => (
@@ -635,7 +630,9 @@ export default function OrderTaking() {
             >
               <span className="font-medium text-stone-800">{v.name}</span>
               <span className="text-sm font-semibold text-brand-700">
-                {formatMoney(Number(variantPickerItem.price) + Number(v.price_delta || 0))}
+                {formatMoney(
+                  Number(variantPickerItem.price) + Number(v.price_delta || 0),
+                )}
               </span>
             </button>
           ))}

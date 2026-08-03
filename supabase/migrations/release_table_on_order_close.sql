@@ -16,3 +16,8 @@ begin
   return new;
 end;
 $$;
+
+drop trigger if exists release_table_on_order_close on public.orders;
+create trigger release_table_on_order_close
+after update on public.orders
+for each row execute function public.release_table_on_order_close();

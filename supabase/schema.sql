@@ -34,7 +34,6 @@ create table if not exists public.staff (
 
 create table if not exists public.categories (
   id uuid primary key default gen_random_uuid(),
-  branch_id uuid not null references public.branches(id) on delete cascade,
   name text not null,
   sort_order int not null default 0,
   created_at timestamptz not null default now()
@@ -42,7 +41,6 @@ create table if not exists public.categories (
 
 create table if not exists public.menu_items (
   id uuid primary key default gen_random_uuid(),
-  branch_id uuid not null references public.branches(id) on delete cascade,
   category_id uuid references public.categories(id) on delete set null,
   name text not null,
   description text,
@@ -51,10 +49,28 @@ create table if not exists public.menu_items (
   is_available boolean not null default true,
   is_featured boolean not null default false,
   requires_kitchen boolean not null default true,
+  has_variants boolean not null default false,
   sort_order int not null default 0,
   created_at timestamptz not null default now()
 );
 
+create table public.menu_item_variants (
+  id uuid primary key default gen_random_uuid(),
+  menu_item_id uuid not null references public.menu_items(id) on delete cascade,
+  name text not null,
+  price_delta numeric(10,2) not null default 0,
+  sort_order int not null default 0,
+  created_at timestamptz not null default now()
+);
+
+create table public.branch_menu_items (
+  id uuid primary key default gen_random_uuid(),
+  branch_id uuid not null references public.branches(id) on delete cascade,
+  menu_item_id uuid not null references public.menu_items(id) on delete cascade,
+  is_available boolean not null default true,
+  created_at timestamptz not null default now(),
+  unique (branch_id, menu_item_id)
+);
 create table if not exists public.tables (
   id uuid primary key default gen_random_uuid(),
   branch_id uuid not null references public.branches(id) on delete cascade,
@@ -1115,7 +1131,7 @@ insert into public.payment_methods (name, code, icon) values
   ('Rocket', 'rocket', '🚀'),
   ('Bank Transfer', 'bank_transfer', '🏦'),
   ('QR Payment', 'qr', '📷'),
-  ('UPI', 'upi', '🔗')
+
 on conflict (code) do nothing;
 
 -- ---------- Demo branch + owner ----------

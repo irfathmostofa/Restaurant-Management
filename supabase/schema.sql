@@ -32,6 +32,7 @@ create table if not exists public.staff (
   updated_at timestamptz not null default now()
 );
 
+-- Categories are GLOBAL / shared across all branches (not branch-owned).
 create table if not exists public.categories (
   id uuid primary key default gen_random_uuid(),
   name text not null,
@@ -39,6 +40,9 @@ create table if not exists public.categories (
   created_at timestamptz not null default now()
 );
 
+-- Menu items are GLOBAL / shared across all branches.
+-- is_available here is the GLOBAL switch (e.g. permanently discontinued).
+-- Per-branch availability/assignment lives in branch_menu_items below.
 create table if not exists public.menu_items (
   id uuid primary key default gen_random_uuid(),
   category_id uuid references public.categories(id) on delete set null,
@@ -54,7 +58,7 @@ create table if not exists public.menu_items (
   created_at timestamptz not null default now()
 );
 
-create table public.menu_item_variants (
+create table if not exists public.menu_item_variants (
   id uuid primary key default gen_random_uuid(),
   menu_item_id uuid not null references public.menu_items(id) on delete cascade,
   name text not null,
@@ -63,7 +67,10 @@ create table public.menu_item_variants (
   created_at timestamptz not null default now()
 );
 
-create table public.branch_menu_items (
+-- Which menu items are assigned/available at which branch.
+-- A row here = "this item is offered at this branch" (subject to is_available).
+-- Absence of a row = item is NOT offered at that branch at all.
+create table if not exists public.branch_menu_items (
   id uuid primary key default gen_random_uuid(),
   branch_id uuid not null references public.branches(id) on delete cascade,
   menu_item_id uuid not null references public.menu_items(id) on delete cascade,
@@ -71,6 +78,7 @@ create table public.branch_menu_items (
   created_at timestamptz not null default now(),
   unique (branch_id, menu_item_id)
 );
+
 create table if not exists public.tables (
   id uuid primary key default gen_random_uuid(),
   branch_id uuid not null references public.branches(id) on delete cascade,
@@ -302,7 +310,6 @@ create trigger currency_settings_updated_at before update on public.currency_set
 for each row execute function public.set_updated_at();
 
 -- ---------- Helper: current staff profile (role-aware) ----------
--- Returns the staff row matching the current auth user, or NULL.
 create or replace function public.current_staff()
 returns public.staff
 language sql stable security definer
@@ -328,8 +335,6 @@ as $$
 $$;
 
 -- ---------- Helper: branch scope for the current staff user ----------
--- Owner/admin -> NULL (all branches). Others -> their branch_id.
--- NULL is the "no restriction" sentinel used by the RLS policies below.
 create or replace function public.branch_scope()
 returns uuid
 language sql stable security definer
@@ -339,10 +344,6 @@ as $$
 $$;
 
 -- ---------- Helper: branch access check (used by view policies) ----------
--- True when the current user (anonymous/public included) can access the branch.
--- NOTE: intentionally does NOT query public.branches — doing so would recurse
--- through the branches RLS policy. Active/inactive filtering is handled by the
--- caller's policy (branches_public_read only exposes active branches).
 create or replace function public.branch_accessible(bid uuid)
 returns boolean
 language sql stable
@@ -359,8 +360,6 @@ as $$
 $$;
 
 -- ---------- Helper: count open reservation slots ----------
--- SECURITY DEFINER so anonymous/authenticated visitors can query
--- availability without exposing the reservations table itself.
 create or replace function public.reserved_tables(branch uuid, on_date date)
 returns int
 language sql stable security definer
@@ -392,8 +391,6 @@ as $$
 $$;
 
 -- ---------- Helper: default landing route for a role ----------
--- Public read so any authenticated user can resolve their landing page
--- immediately after sign-in (before the staff profile is re-fetched).
 create or replace function public.default_route_for(role_name text)
 returns text
 language sql stable security definer
@@ -415,6 +412,36 @@ as $$
   from public.settings
   where key = setting_key
   limit 1;
+$$;
+
+-- ---------- Helper: menu items available at a branch (global item AND branch both enabled) ----------
+-- Frontend menu pages should query through this rather than filtering
+-- menu_items alone, since availability is now branch-specific.
+create or replace function public.branch_menu(branch uuid)
+returns table (
+  id uuid,
+  category_id uuid,
+  name text,
+  description text,
+  price numeric,
+  photo_url text,
+  is_featured boolean,
+  requires_kitchen boolean,
+  has_variants boolean,
+  sort_order int
+)
+language sql stable
+set search_path = public
+as $$
+  select mi.id, mi.category_id, mi.name, mi.description, mi.price,
+         mi.photo_url, mi.is_featured, mi.requires_kitchen, mi.has_variants, mi.sort_order
+  from public.menu_items mi
+  join public.branch_menu_items bmi
+    on bmi.menu_item_id = mi.id
+   and bmi.branch_id = branch
+  where mi.is_available = true
+    and bmi.is_available = true
+  order by mi.sort_order;
 $$;
 
 -- ---------- Trigger: keep staff.email in sync with auth.users ----------
@@ -439,8 +466,6 @@ after insert or update of user_id on public.staff
 for each row execute function public.handle_new_staff();
 
 -- ---------- Trigger: snapshot branch_id on order_items ----------
--- Guarantees every item carries its branch so Realtime filters and
--- branch-scoped queries work even if a client forgets to send it.
 create or replace function public.sync_order_item_branch()
 returns trigger
 language plpgsql security definer
@@ -502,6 +527,10 @@ drop trigger if exists branches_seed_payment_methods on public.branches;
 create trigger branches_seed_payment_methods
 after insert on public.branches
 for each row execute function public.seed_branch_payment_methods();
+
+-- NOTE: unlike payment methods, menu items are NOT auto-assigned to new
+-- branches. Admin manually assigns/enables each menu item per branch via
+-- branch_menu_items (per the product decision). No seeding trigger here.
 
 -- ---------- Audit writer (SECURITY DEFINER, callable by any role) ----------
 create or replace function public.log_activity(
@@ -728,6 +757,8 @@ alter table public.branches enable row level security;
 alter table public.staff enable row level security;
 alter table public.categories enable row level security;
 alter table public.menu_items enable row level security;
+alter table public.menu_item_variants enable row level security;
+alter table public.branch_menu_items enable row level security;
 alter table public.tables enable row level security;
 alter table public.reservations enable row level security;
 alter table public.orders enable row level security;
@@ -771,8 +802,6 @@ create policy staff_write_owner on public.staff
   for all using (public.is_owner())
   with check (public.is_owner());
 
--- Managers: manage staff in their own branch only. They may never target
--- owner/admin accounts and can never move a staff member to another branch.
 drop policy if exists staff_write_manager on public.staff;
 create policy staff_write_manager on public.staff
   for all using (
@@ -785,42 +814,65 @@ create policy staff_write_manager on public.staff
     and role not in ('owner', 'admin')
   );
 
--- Self service: every staff member may update their own profile row.
 drop policy if exists staff_write_self on public.staff;
 create policy staff_write_self on public.staff
   for update using (user_id = auth.uid())
   with check (user_id = auth.uid());
 
--- ---------- Categories (branch scoped) ----------
+-- ---------- Categories (GLOBAL — not branch scoped) ----------
+-- Anyone (including anonymous customers) can read categories; only
+-- owner/admin can create/edit/delete them.
 drop policy if exists categories_read on public.categories;
 create policy categories_read on public.categories
-  for select using (public.branch_accessible(branch_id));
+  for select using (true);
 
 drop policy if exists categories_write on public.categories;
 create policy categories_write on public.categories
-  for all using (
-    public.is_owner()
-    or branch_id = public.branch_scope()
-  )
-  with check (
-    public.is_owner()
-    or branch_id = public.branch_scope()
-  );
+  for all using (public.is_owner())
+  with check (public.is_owner());
 
--- ---------- Menu items (branch scoped; available items public) ----------
+-- ---------- Menu items (GLOBAL — not branch scoped) ----------
+-- Public/customers only ever see globally-available items; whether an item
+-- is actually orderable at a given branch is filtered separately via
+-- branch_menu_items (see public.branch_menu() helper above).
 drop policy if exists menu_items_public_read on public.menu_items;
 create policy menu_items_public_read on public.menu_items
-  for select using (
-    is_available = true
-    and branch_id in (select b.id from public.branches b where b.is_active = true)
-  );
+  for select using (is_available = true);
 
 drop policy if exists menu_items_staff_read on public.menu_items;
 create policy menu_items_staff_read on public.menu_items
-  for select using (public.branch_accessible(branch_id));
+  for select using (public.current_staff() is not null);
 
 drop policy if exists menu_items_staff_write on public.menu_items;
 create policy menu_items_staff_write on public.menu_items
+  for all using (public.is_owner())
+  with check (public.is_owner());
+
+-- ---------- Menu item variants (follow parent item's visibility) ----------
+drop policy if exists menu_item_variants_read on public.menu_item_variants;
+create policy menu_item_variants_read on public.menu_item_variants
+  for select using (
+    exists (
+      select 1 from public.menu_items mi
+      where mi.id = menu_item_id
+        and (mi.is_available = true or public.current_staff() is not null)
+    )
+  );
+
+drop policy if exists menu_item_variants_write on public.menu_item_variants;
+create policy menu_item_variants_write on public.menu_item_variants
+  for all using (public.is_owner())
+  with check (public.is_owner());
+
+-- ---------- Branch menu items (branch-scoped assignment/availability) ----------
+-- Public read so customer sites can resolve per-branch availability;
+-- only owner/admin (or that branch's own staff) can assign/toggle items.
+drop policy if exists branch_menu_items_read on public.branch_menu_items;
+create policy branch_menu_items_read on public.branch_menu_items
+  for select using (true);
+
+drop policy if exists branch_menu_items_write on public.branch_menu_items;
+create policy branch_menu_items_write on public.branch_menu_items
   for all using (
     public.is_owner()
     or branch_id = public.branch_scope()
@@ -1082,6 +1134,9 @@ begin
     if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'expenses') then
       alter publication supabase_realtime add table public.expenses;
     end if;
+    if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'branch_menu_items') then
+      alter publication supabase_realtime add table public.branch_menu_items;
+    end if;
   end if;
 end $$;
 
@@ -1123,6 +1178,7 @@ insert into public.role_default_routes (role, route) values
 on conflict (role) do nothing;
 
 -- ---------- Payment methods ----------
+-- (fixed: removed trailing comma that broke this insert)
 insert into public.payment_methods (name, code, icon) values
   ('Cash', 'cash', '💵'),
   ('Card', 'card', '💳'),
@@ -1130,8 +1186,7 @@ insert into public.payment_methods (name, code, icon) values
   ('Nagad', 'nagad', '📱'),
   ('Rocket', 'rocket', '🚀'),
   ('Bank Transfer', 'bank_transfer', '🏦'),
-  ('QR Payment', 'qr', '📷'),
-
+  ('QR Payment', 'qr', '📷')
 on conflict (code) do nothing;
 
 -- ---------- Demo branch + owner ----------
@@ -1150,8 +1205,6 @@ select 'Riverside Kitchen', '45 River Road, Cityville', '+1 555-0120',
 where not exists (select 1 from public.branches b where b.name = 'Riverside Kitchen');
 
 -- ---------- Branch payment method defaults ----------
--- Enables every active method for the demo branches (row insert only fires
--- the seeding trigger on new branches, so seed the existing ones explicitly).
 insert into public.branch_payment_methods (branch_id, payment_method_id, is_enabled)
 select b.id, pm.id, true
 from public.branches b
@@ -1163,82 +1216,73 @@ where pm.is_active = true
   );
 
 -- Example per-branch configuration so the feature is visible out of the box:
--- Downtown Bistro keeps everything; Riverside Kitchen disables card/UPI/QR
--- to mimic a branch that prefers local mobile wallets.
 update public.branch_payment_methods set is_enabled = false
 where payment_method_id in (
-  select id from public.payment_methods where code in ('card', 'upi', 'qr')
+  select id from public.payment_methods where code in ('card', 'qr')
 )
 and branch_id in (
   select id from public.branches where name = 'Riverside Kitchen'
 );
 
-insert into public.categories (branch_id, name, sort_order)
-select b.id, 'Starters', 1
-from public.branches b
-where b.name = 'Downtown Bistro'
-  and not exists (select 1 from public.categories c where c.branch_id = b.id and c.name = 'Starters');
+-- ---------- Categories (GLOBAL — no branch_id) ----------
+insert into public.categories (name, sort_order) values
+  ('Starters', 1),
+  ('Mains', 2),
+  ('Desserts', 3),
+  ('Drinks', 4)
+on conflict do nothing;
 
-insert into public.categories (branch_id, name, sort_order)
-select b.id, 'Mains', 2
-from public.branches b
-where b.name = 'Downtown Bistro'
-  and not exists (select 1 from public.categories c where c.branch_id = b.id and c.name = 'Mains');
+-- ---------- Menu items (GLOBAL — no branch_id) ----------
+insert into public.menu_items (category_id, name, description, price, requires_kitchen, sort_order)
+select c.id, 'Garlic Bread', 'Toasted baguette with garlic butter', 4.50, true, 1
+from public.categories c
+where c.name = 'Starters'
+  and not exists (select 1 from public.menu_items m where m.name = 'Garlic Bread');
 
-insert into public.categories (branch_id, name, sort_order)
-select b.id, 'Desserts', 3
-from public.branches b
-where b.name = 'Downtown Bistro'
-  and not exists (select 1 from public.categories c where c.branch_id = b.id and c.name = 'Desserts');
+insert into public.menu_items (category_id, name, description, price, requires_kitchen, sort_order)
+select c.id, 'Grilled Chicken', 'Herb-marinated chicken breast', 16.00, true, 1
+from public.categories c
+where c.name = 'Mains'
+  and not exists (select 1 from public.menu_items m where m.name = 'Grilled Chicken');
 
-insert into public.categories (branch_id, name, sort_order)
-select b.id, 'Drinks', 4
-from public.branches b
-where b.name = 'Downtown Bistro'
-  and not exists (select 1 from public.categories c where c.branch_id = b.id and c.name = 'Drinks');
+insert into public.menu_items (category_id, name, description, price, requires_kitchen, sort_order)
+select c.id, 'Chocolate Lava Cake', 'Warm cake with molten center', 7.00, true, 1
+from public.categories c
+where c.name = 'Desserts'
+  and not exists (select 1 from public.menu_items m where m.name = 'Chocolate Lava Cake');
 
-insert into public.menu_items (branch_id, category_id, name, description, price, requires_kitchen, sort_order)
-select b.id, c.id, 'Garlic Bread', 'Toasted baguette with garlic butter', 4.50, true, 1
-from public.branches b
-join public.categories c on c.branch_id = b.id and c.name = 'Starters'
-where b.name = 'Downtown Bistro'
-  and not exists (select 1 from public.menu_items m where m.branch_id = b.id and m.name = 'Garlic Bread');
+insert into public.menu_items (category_id, name, description, price, requires_kitchen, sort_order)
+select c.id, 'Fresh Lemonade', 'House-made lemonade', 3.50, false, 1
+from public.categories c
+where c.name = 'Drinks'
+  and not exists (select 1 from public.menu_items m where m.name = 'Fresh Lemonade');
 
-insert into public.menu_items (branch_id, category_id, name, description, price, requires_kitchen, sort_order)
-select b.id, c.id, 'Grilled Chicken', 'Herb-marinated chicken breast', 16.00, true, 1
-from public.branches b
-join public.categories c on c.branch_id = b.id and c.name = 'Mains'
-where b.name = 'Downtown Bistro'
-  and not exists (select 1 from public.menu_items m where m.branch_id = b.id and m.name = 'Grilled Chicken');
+insert into public.menu_items (category_id, name, description, price, requires_kitchen, sort_order)
+select c.id, 'Mineral Water', 'Chilled bottled water', 1.50, false, 2
+from public.categories c
+where c.name = 'Drinks'
+  and not exists (select 1 from public.menu_items m where m.name = 'Mineral Water');
 
-insert into public.menu_items (branch_id, category_id, name, description, price, requires_kitchen, sort_order)
-select b.id, c.id, 'Chocolate Lava Cake', 'Warm cake with molten center', 7.00, true, 1
-from public.branches b
-join public.categories c on c.branch_id = b.id and c.name = 'Desserts'
-where b.name = 'Downtown Bistro'
-  and not exists (select 1 from public.menu_items m where m.branch_id = b.id and m.name = 'Chocolate Lava Cake');
+insert into public.menu_items (category_id, name, description, price, requires_kitchen, sort_order)
+select c.id, 'Cold Drink', 'Soft drink, ice cold', 2.00, false, 3
+from public.categories c
+where c.name = 'Drinks'
+  and not exists (select 1 from public.menu_items m where m.name = 'Cold Drink');
 
-insert into public.menu_items (branch_id, category_id, name, description, price, requires_kitchen, sort_order)
-select b.id, c.id, 'Fresh Lemonade', 'House-made lemonade', 3.50, false, 1
+-- ---------- Assign the demo menu to BOTH demo branches ----------
+-- (Manual assignment, per the "admin picks branches each time" decision —
+-- this is just seeding both branches with the same demo items for
+-- convenience. In the real admin UI, this happens one item/branch at a time.)
+insert into public.branch_menu_items (branch_id, menu_item_id, is_available)
+select b.id, m.id, true
 from public.branches b
-join public.categories c on c.branch_id = b.id and c.name = 'Drinks'
-where b.name = 'Downtown Bistro'
-  and not exists (select 1 from public.menu_items m where m.branch_id = b.id and m.name = 'Fresh Lemonade');
+cross join public.menu_items m
+where not exists (
+  select 1 from public.branch_menu_items bmi
+  where bmi.branch_id = b.id and bmi.menu_item_id = m.id
+);
 
-insert into public.menu_items (branch_id, category_id, name, description, price, requires_kitchen, sort_order)
-select b.id, c.id, 'Mineral Water', 'Chilled bottled water', 1.50, false, 2
-from public.branches b
-join public.categories c on c.branch_id = b.id and c.name = 'Drinks'
-where b.name = 'Downtown Bistro'
-  and not exists (select 1 from public.menu_items m where m.branch_id = b.id and m.name = 'Mineral Water');
-
-insert into public.menu_items (branch_id, category_id, name, description, price, requires_kitchen, sort_order)
-select b.id, c.id, 'Cold Drink', 'Soft drink, ice cold', 2.00, false, 3
-from public.branches b
-join public.categories c on c.branch_id = b.id and c.name = 'Drinks'
-where b.name = 'Downtown Bistro'
-  and not exists (select 1 from public.menu_items m where m.branch_id = b.id and m.name = 'Cold Drink');
-
+-- ---------- Tables ----------
 insert into public.tables (branch_id, number, capacity)
 select b.id, 'T1', 4
 from public.branches b
@@ -1256,6 +1300,7 @@ select b.id, 'T3', 2
 from public.branches b
 where b.name = 'Downtown Bistro'
   and not exists (select 1 from public.tables t where t.branch_id = b.id and t.number = 'T3');
+
 -- ---------- Featured (popular) demo dishes ----------
 update public.menu_items set is_featured = true
 where name in ('Grilled Chicken', 'Chocolate Lava Cake', 'Garlic Bread', 'Fresh Lemonade');
@@ -1273,7 +1318,6 @@ values
   ('profile-images', 'profile-images', true, 5242880, array['image/jpeg', 'image/png', 'image/webp', 'image/gif'])
 on conflict (id) do nothing;
 
--- Public read for images in both buckets.
 drop policy if exists "public_read_product_images" on storage.objects;
 create policy "public_read_product_images" on storage.objects
   for select using (bucket_id in ('product-images', 'branding'));
@@ -1286,7 +1330,6 @@ drop policy if exists "public_read_branch_profile_images" on storage.objects;
 create policy "public_read_branch_profile_images" on storage.objects
   for select using (bucket_id in ('branch-images', 'profile-images'));
 
--- Authenticated staff may upload / replace / delete images.
 drop policy if exists "staff_write_product_images" on storage.objects;
 create policy "staff_write_product_images" on storage.objects
   for all using (
@@ -1320,6 +1363,7 @@ create policy "staff_write_expense_attachments" on storage.objects
       where s.user_id = auth.uid()
     )
   );
+
 -- ============================================================
 -- Scheduled cleanup (activity logs older than 7 days)
 -- ============================================================

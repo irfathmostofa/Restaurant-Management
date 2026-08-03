@@ -1,94 +1,128 @@
-import { useEffect, useMemo, useState, useRef } from 'react'
-import { useNavigate, Link } from 'react-router-dom'
-import supabase from '../../lib/supabase'
-import { useBranch } from '../../context/BranchContext'
-import { useAuth } from '../../context/AuthContext'
-import { useCurrency } from '../../context/CurrencyContext'
-import { fetchSettings, DEFAULT_SETTINGS } from '../../lib/config'
-import { buildKotHtml, openPrintWindow, printHtml } from '../../lib/printing'
-import { hasKitchenItems } from '../../lib/kitchen'
-import useOrderReadyNotifications from '../../hooks/useOrderReadyNotifications'
-import { logActivity } from '../../lib/activity'
-import PageHeader from '../../components/admin/PageHeader'
+import { useEffect, useMemo, useState, useRef } from "react";
+import { useNavigate, Link } from "react-router-dom";
+import supabase from "../../lib/supabase";
+import { useBranch } from "../../context/BranchContext";
+import { useAuth } from "../../context/AuthContext";
+import { useCurrency } from "../../context/CurrencyContext";
+import { fetchSettings, DEFAULT_SETTINGS } from "../../lib/config";
+import { buildKotHtml, openPrintWindow, printHtml } from "../../lib/printing";
+import { hasKitchenItems } from "../../lib/kitchen";
+import useOrderReadyNotifications from "../../hooks/useOrderReadyNotifications";
+import { logActivity } from "../../lib/activity";
+import PageHeader from "../../components/admin/PageHeader";
 
 export default function OrderTaking() {
-  const { activeBranch, activeBranchId } = useBranch()
-  const { staff } = useAuth()
-  const { formatMoney } = useCurrency()
-  const navigate = useNavigate()
-  const [tables, setTables] = useState([])
-  const [menuItems, setMenuItems] = useState([])
-  const [categories, setCategories] = useState([])
-  const [activeCategory, setActiveCategory] = useState('all')
-  const [search, setSearch] = useState('')
-  const [loading, setLoading] = useState(true)
-  const [orderType, setOrderType] = useState('dine-in')
-  const [selectedTable, setSelectedTable] = useState(null)
-  const [customerName, setCustomerName] = useState('')
-  const [orderNotes, setOrderNotes] = useState('')
-  const [cart, setCart] = useState([]) // { menu_item_id, name, price, quantity, notes, requires_kitchen }
-  const [submitting, setSubmitting] = useState(false)
-  const [error, setError] = useState(null)
-  const searchRef = useRef(null)
-  const { notifications, dismiss } = useOrderReadyNotifications(activeBranchId)
+  const { activeBranch, activeBranchId } = useBranch();
+  const { staff } = useAuth();
+  const { formatMoney } = useCurrency();
+  const navigate = useNavigate();
+  const [tables, setTables] = useState([]);
+  const [menuItems, setMenuItems] = useState([]); // merged: menu_items + this branch's availability
+  const [categories, setCategories] = useState([]);
+  const [activeCategory, setActiveCategory] = useState("all");
+  const [search, setSearch] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [orderType, setOrderType] = useState("dine-in");
+  const [selectedTable, setSelectedTable] = useState(null);
+  const [customerName, setCustomerName] = useState("");
+  const [orderNotes, setOrderNotes] = useState("");
+  const [cart, setCart] = useState([]); // { menu_item_id, name, price, quantity, notes, requires_kitchen }
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState(null);
+  const searchRef = useRef(null);
+  const { notifications, dismiss } = useOrderReadyNotifications(activeBranchId);
 
   useEffect(() => {
     if (!activeBranchId) return;
     let active = true;
     setLoading(true);
     Promise.all([
-      supabase.from('tables').select('*').eq('branch_id', activeBranchId).order('number'),
-      supabase.from('menu_items').select('*').eq('branch_id', activeBranchId).order('sort_order'),
-      supabase.from('categories').select('*').eq('branch_id', activeBranchId).order('sort_order')
-    ]).then(([tablesRes, menuRes, catRes]) => {
-      if (!active) return
-      if (!tablesRes.error) setTables(tablesRes.data || [])
-      if (!menuRes.error) setMenuItems(menuRes.data || [])
-      if (!catRes.error) setCategories(catRes.data || [])
-      setLoading(false)
-    })
-    return () => { active = false }
-  }, [activeBranchId])
+      supabase
+        .from("tables")
+        .select("*")
+        .eq("branch_id", activeBranchId)
+        .order("number"),
+      // menu_items/categories are GLOBAL now. What's actually orderable at
+      // THIS branch comes from branch_menu_items — join through it so we
+      // get each item plus this branch's own is_available flag.
+      supabase
+        .from("branch_menu_items")
+        .select("is_available, menu_item_id, menu_items(*)")
+        .eq("branch_id", activeBranchId),
+      supabase.from("categories").select("*").order("sort_order"),
+    ]).then(([tablesRes, bmiRes, catRes]) => {
+      if (!active) return;
+      if (!tablesRes.error) setTables(tablesRes.data || []);
+      if (!bmiRes.error) {
+        const merged = (bmiRes.data || [])
+          .filter((row) => row.menu_items) // guard against a dangling row if an item was deleted
+          .map((row) => ({
+            ...row.menu_items,
+            branch_available: row.is_available,
+          }))
+          .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+        setMenuItems(merged);
+      }
+      if (!catRes.error) setCategories(catRes.data || []);
+      setLoading(false);
+    });
+    return () => {
+      active = false;
+    };
+  }, [activeBranchId]);
 
   // Keyboard shortcuts: "/" focuses search, Enter submits a ready cart.
   useEffect(() => {
     const onKey = (e) => {
-      const tag = e.target?.tagName?.toLowerCase()
-      if (e.key === 'Enter') {
+      const tag = e.target?.tagName?.toLowerCase();
+      if (e.key === "Enter") {
         // Enter submits the order unless the user is editing a multi-line
         // field. Prevents accidental submits while typing line notes.
-        if (tag === 'textarea' || tag === 'select') return
-        if (e.shiftKey || e.metaKey || e.ctrlKey || e.altKey) return
+        if (tag === "textarea" || tag === "select") return;
+        if (e.shiftKey || e.metaKey || e.ctrlKey || e.altKey) return;
         if (canSubmitRef.current) {
-          e.preventDefault()
-          submitRef.current?.()
+          e.preventDefault();
+          submitRef.current?.();
         }
-        return
+        return;
       }
-      if (tag === 'input' || tag === 'textarea' || tag === 'select') return
-      if (e.key === '/' && searchRef.current) {
-        e.preventDefault()
-        searchRef.current.focus()
+      if (tag === "input" || tag === "textarea" || tag === "select") return;
+      if (e.key === "/" && searchRef.current) {
+        e.preventDefault();
+        searchRef.current.focus();
       }
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [])
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   const visibleItems = useMemo(() => {
-    const q = search.trim().toLowerCase()
+    const q = search.trim().toLowerCase();
     return menuItems.filter((i) => {
-      if (!i.is_available) return false
-      if (activeCategory !== 'all' && i.category_id !== activeCategory) return false
-      if (q && !i.name.toLowerCase().includes(q)) return false
-      return true
-    })
-  }, [menuItems, activeCategory, search])
+      // Both flags must be true: globally active AND enabled at this branch.
+      if (!i.is_available) return false;
+      if (!i.branch_available) return false;
+      if (activeCategory !== "all" && i.category_id !== activeCategory)
+        return false;
+      if (q && !i.name.toLowerCase().includes(q)) return false;
+      return true;
+    });
+  }, [menuItems, activeCategory, search]);
+
+  // Only show category chips that actually have items on this branch's menu.
+  const categoriesWithItems = useMemo(() => {
+    const activeIds = new Set(
+      menuItems
+        .filter((i) => i.is_available && i.branch_available)
+        .map((i) => i.category_id),
+    );
+    return categories.filter((c) => activeIds.has(c.id));
+  }, [categories, menuItems]);
 
   // Hold the latest submit handler + cart state in refs so the keyboard
   // listener below never sees stale closures.
-  const submitRef = useRef(null)
-  const canSubmitRef = useRef(false)
+  const submitRef = useRef(null);
+  const canSubmitRef = useRef(false);
 
   if (!activeBranch) {
     return <p className="text-stone-500">Select a branch to take orders.</p>;
@@ -152,17 +186,19 @@ export default function OrderTaking() {
     const kotWin = hasKitchenInCart ? openPrintWindow() : null;
 
     const { data: order, error: orderError } = await supabase
-      .from('orders')
-      .insert([{
-        branch_id: activeBranchId,
-        table_id: orderType === 'dine-in' ? selectedTable : null,
-        type: orderType,
-        // Orders with only non-kitchen items are ready immediately.
-        status: hasKitchenInCart ? 'received' : 'ready',
-        staff_id: staff?.id || null,
-        customer_name: customerName || null,
-        notes: orderNotes.trim() || null
-      }])
+      .from("orders")
+      .insert([
+        {
+          branch_id: activeBranchId,
+          table_id: orderType === "dine-in" ? selectedTable : null,
+          type: orderType,
+          // Orders with only non-kitchen items are ready immediately.
+          status: hasKitchenInCart ? "received" : "ready",
+          staff_id: staff?.id || null,
+          customer_name: customerName || null,
+          notes: orderNotes.trim() || null,
+        },
+      ])
       .select()
       .single();
 
@@ -197,13 +233,22 @@ export default function OrderTaking() {
       .insert(itemsPayload);
     if (itemsError) {
       // Roll back the empty order so we never leave an orphaned row behind.
-      await supabase.from('orders').delete().eq('id', order.id).select().then(({ error: delError }) => {
-        if (delError) console.error('Failed to roll back orphaned order:', delError.message)
-      })
-      if (kotWin) kotWin.close()
-      setSubmitting(false)
-      setError(itemsError.message)
-      return
+      await supabase
+        .from("orders")
+        .delete()
+        .eq("id", order.id)
+        .select()
+        .then(({ error: delError }) => {
+          if (delError)
+            console.error(
+              "Failed to roll back orphaned order:",
+              delError.message,
+            );
+        });
+      if (kotWin) kotWin.close();
+      setSubmitting(false);
+      setError(itemsError.message);
+      return;
     }
 
     if (orderType === "dine-in") {
@@ -236,31 +281,35 @@ export default function OrderTaking() {
     }
 
     logActivity({
-      module: 'orders',
-      action: 'create',
-      description: `Created ${orderType} order #${order.id.slice(0, 8).toUpperCase()} (${cart.length} item${cart.length === 1 ? '' : 's'}, ${formatMoney(total, { symbol: false })})`,
+      module: "orders",
+      action: "create",
+      description: `Created ${orderType} order #${order.id.slice(0, 8).toUpperCase()} (${cart.length} item${cart.length === 1 ? "" : "s"}, ${formatMoney(total, { symbol: false })})`,
       branchId: activeBranchId,
-      metadata: { order_id: order.id, type: orderType }
-    })
+      metadata: { order_id: order.id, type: orderType },
+    });
 
-    setSubmitting(false)
+    setSubmitting(false);
     // Success → reset cart, navigate to billing to collect payment.
-    setCart([])
-    setCustomerName('')
-    setOrderNotes('')
-    setSelectedTable(null)
-    navigate('/admin/billing', { state: { newOrderId: order.id } })
-  }
+    setCart([]);
+    setCustomerName("");
+    setOrderNotes("");
+    setSelectedTable(null);
+    navigate("/admin/billing", { state: { newOrderId: order.id } });
+  };
 
   // Refresh refs each render so the global keyboard handler stays in sync.
-  submitRef.current = submitOrder
-  canSubmitRef.current = cart.length > 0 && !submitting
+  submitRef.current = submitOrder;
+  canSubmitRef.current = cart.length > 0 && !submitting;
 
   return (
     <div>
       <PageHeader
         title="POS / Order Taking"
-        subtitle={activeBranch ? `Take an order at ${activeBranch.name}` : 'Select a branch'}
+        subtitle={
+          activeBranch
+            ? `Take an order at ${activeBranch.name}`
+            : "Select a branch"
+        }
       />
 
       {notifications.length > 0 && (
@@ -292,32 +341,40 @@ export default function OrderTaking() {
             <div className="flex flex-wrap items-center gap-3">
               <div className="flex gap-2">
                 <button
-                  onClick={() => setOrderType('dine-in')}
-                  className={`px-4 py-2 rounded-lg text-sm font-medium border ${orderType === 'dine-in' ? 'bg-brand-600 text-white border-brand-600' : 'bg-white text-stone-600 border-stone-300 hover:border-brand-400'}`}
+                  onClick={() => setOrderType("dine-in")}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium border ${orderType === "dine-in" ? "bg-brand-600 text-white border-brand-600" : "bg-white text-stone-600 border-stone-300 hover:border-brand-400"}`}
                 >
                   Dine-in
                 </button>
                 <button
-                  onClick={() => { setOrderType('takeaway'); setSelectedTable(null) }}
-                  className={`px-4 py-2 rounded-lg text-sm font-medium border ${orderType === 'takeaway' ? 'bg-brand-600 text-white border-brand-600' : 'bg-white text-stone-600 border-stone-300 hover:border-brand-400'}`}
+                  onClick={() => {
+                    setOrderType("takeaway");
+                    setSelectedTable(null);
+                  }}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium border ${orderType === "takeaway" ? "bg-brand-600 text-white border-brand-600" : "bg-white text-stone-600 border-stone-300 hover:border-brand-400"}`}
                 >
                   Takeaway
                 </button>
               </div>
 
-              {orderType === 'dine-in' && (
+              {orderType === "dine-in" && (
                 <div className="flex flex-wrap gap-2">
-                  {tables.filter((t) => t.status !== 'occupied').map((t) => (
-                    <button
-                      key={t.id}
-                      onClick={() => setSelectedTable(t.id)}
-                      className={`w-10 h-10 rounded-lg border text-sm font-semibold transition-colors ${selectedTable === t.id ? 'bg-brand-600 text-white border-brand-600' : 'bg-white text-stone-700 border-stone-300 hover:border-brand-400'}`}
-                    >
-                      {t.number}
-                    </button>
-                  ))}
-                  {tables.filter((t) => t.status === 'occupied').length > 0 && (
-                    <span className="text-xs text-stone-400 self-center">{tables.filter((t) => t.status === 'occupied').length} occupied</span>
+                  {tables
+                    .filter((t) => t.status !== "occupied")
+                    .map((t) => (
+                      <button
+                        key={t.id}
+                        onClick={() => setSelectedTable(t.id)}
+                        className={`w-10 h-10 rounded-lg border text-sm font-semibold transition-colors ${selectedTable === t.id ? "bg-brand-600 text-white border-brand-600" : "bg-white text-stone-700 border-stone-300 hover:border-brand-400"}`}
+                      >
+                        {t.number}
+                      </button>
+                    ))}
+                  {tables.filter((t) => t.status === "occupied").length > 0 && (
+                    <span className="text-xs text-stone-400 self-center">
+                      {tables.filter((t) => t.status === "occupied").length}{" "}
+                      occupied
+                    </span>
                   )}
                 </div>
               )}
@@ -353,16 +410,16 @@ export default function OrderTaking() {
             />
             <div className="flex gap-2 overflow-x-auto pb-1 -mb-1">
               <button
-                onClick={() => setActiveCategory('all')}
-                className={`shrink-0 px-3 py-1.5 rounded-full text-sm font-medium border ${activeCategory === 'all' ? 'bg-brand-600 text-white border-brand-600' : 'bg-white text-stone-600 border-stone-300 hover:border-brand-400'}`}
+                onClick={() => setActiveCategory("all")}
+                className={`shrink-0 px-3 py-1.5 rounded-full text-sm font-medium border ${activeCategory === "all" ? "bg-brand-600 text-white border-brand-600" : "bg-white text-stone-600 border-stone-300 hover:border-brand-400"}`}
               >
                 All
               </button>
-              {categories.map((cat) => (
+              {categoriesWithItems.map((cat) => (
                 <button
                   key={cat.id}
                   onClick={() => setActiveCategory(cat.id)}
-                  className={`shrink-0 px-3 py-1.5 rounded-full text-sm font-medium border ${activeCategory === cat.id ? 'bg-brand-600 text-white border-brand-600' : 'bg-white text-stone-600 border-stone-300 hover:border-brand-400'}`}
+                  className={`shrink-0 px-3 py-1.5 rounded-full text-sm font-medium border ${activeCategory === cat.id ? "bg-brand-600 text-white border-brand-600" : "bg-white text-stone-600 border-stone-300 hover:border-brand-400"}`}
                 >
                   {cat.name}
                 </button>
@@ -375,7 +432,15 @@ export default function OrderTaking() {
             {loading ? (
               <p className="text-stone-500 py-10 text-center">Loading menu…</p>
             ) : visibleItems.length === 0 ? (
-              <p className="text-stone-400 py-10 text-center">No menu items match.{'\u00A0'}<Link to="/admin/menu" className="text-brand-600 hover:text-brand-700">Manage menu</Link></p>
+              <p className="text-stone-400 py-10 text-center">
+                No menu items match.{"\u00A0"}
+                <Link
+                  to="/admin/menu"
+                  className="text-brand-600 hover:text-brand-700"
+                >
+                  Manage menu
+                </Link>
+              </p>
             ) : (
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 max-h-[calc(100vh-320px)] min-h-[320px] overflow-y-auto pr-1">
                 {visibleItems.map((item) => (
@@ -385,15 +450,26 @@ export default function OrderTaking() {
                     className="text-left p-3 rounded-lg border border-stone-200 hover:border-brand-400 hover:bg-brand-50/50 transition-colors active:scale-[0.98]"
                   >
                     {item.photo_url && (
-                      <img src={item.photo_url} alt={item.name} className="w-full h-20 object-cover rounded-md mb-2" loading="lazy" />
+                      <img
+                        src={item.photo_url}
+                        alt={item.name}
+                        className="w-full h-20 object-cover rounded-md mb-2"
+                        loading="lazy"
+                      />
                     )}
                     <div className="flex justify-between items-start gap-2">
-                      <span className="font-medium text-stone-800 text-sm leading-tight">{item.name}</span>
+                      <span className="font-medium text-stone-800 text-sm leading-tight">
+                        {item.name}
+                      </span>
                     </div>
                     <div className="flex items-center justify-between mt-1">
-                      <span className="text-brand-700 text-sm font-semibold whitespace-nowrap">{formatMoney(item.price)}</span>
-                      <span className={`shrink-0 text-[10px] font-medium rounded px-1.5 py-0.5 ${item.requires_kitchen !== false ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>
-                        {item.requires_kitchen !== false ? 'Kitchen' : 'Ready'}
+                      <span className="text-brand-700 text-sm font-semibold whitespace-nowrap">
+                        {formatMoney(item.price)}
+                      </span>
+                      <span
+                        className={`shrink-0 text-[10px] font-medium rounded px-1.5 py-0.5 ${item.requires_kitchen !== false ? "bg-amber-100 text-amber-700" : "bg-emerald-100 text-emerald-700"}`}
+                      >
+                        {item.requires_kitchen !== false ? "Kitchen" : "Ready"}
                       </span>
                     </div>
                   </button>
@@ -408,24 +484,52 @@ export default function OrderTaking() {
           <div className="bg-white rounded-xl border border-stone-200 p-5 xl:sticky xl:top-24">
             <div className="flex items-center justify-between mb-4">
               <h2 className="font-semibold text-stone-900">Current order</h2>
-              <span className="text-xs font-medium rounded-full bg-stone-100 text-stone-600 px-2.5 py-0.5 capitalize">{orderType}{selectedTable ? ` · T${tables.find((t) => t.id === selectedTable)?.number}` : ''}</span>
+              <span className="text-xs font-medium rounded-full bg-stone-100 text-stone-600 px-2.5 py-0.5 capitalize">
+                {orderType}
+                {selectedTable
+                  ? ` · T${tables.find((t) => t.id === selectedTable)?.number}`
+                  : ""}
+              </span>
             </div>
 
             {cart.length === 0 ? (
-              <p className="text-sm text-stone-400 text-center py-8">Tap items on the left to add them.</p>
+              <p className="text-sm text-stone-400 text-center py-8">
+                Tap items on the left to add them.
+              </p>
             ) : (
               <ul className="space-y-3 mb-4 max-h-[calc(100vh-380px)] overflow-y-auto pr-1">
                 {cart.map((c) => (
-                  <li key={c.menu_item_id} className="border border-stone-100 rounded-lg p-3">
+                  <li
+                    key={c.menu_item_id}
+                    className="border border-stone-100 rounded-lg p-3"
+                  >
                     <div className="flex items-center justify-between mb-1 gap-2">
-                      <span className="font-medium text-sm text-stone-800">{c.name}</span>
-                      <span className="text-sm font-semibold text-stone-900 whitespace-nowrap">{formatMoney(c.price * c.quantity)}</span>
+                      <span className="font-medium text-sm text-stone-800">
+                        {c.name}
+                      </span>
+                      <span className="text-sm font-semibold text-stone-900 whitespace-nowrap">
+                        {formatMoney(c.price * c.quantity)}
+                      </span>
                     </div>
                     <div className="flex items-center gap-2 mb-2">
-                      <button onClick={() => updateQty(c.menu_item_id, -1)} className="w-8 h-8 rounded-md border border-stone-300 text-stone-600 hover:bg-stone-50 text-lg leading-none">−</button>
-                      <span className="w-8 text-center text-sm font-medium">{c.quantity}</span>
-                      <button onClick={() => updateQty(c.menu_item_id, 1)} className="w-8 h-8 rounded-md border border-stone-300 text-stone-600 hover:bg-stone-50 text-lg leading-none">+</button>
-                      <span className="ml-auto text-xs text-stone-400">{formatMoney(c.price)} each</span>
+                      <button
+                        onClick={() => updateQty(c.menu_item_id, -1)}
+                        className="w-8 h-8 rounded-md border border-stone-300 text-stone-600 hover:bg-stone-50 text-lg leading-none"
+                      >
+                        −
+                      </button>
+                      <span className="w-8 text-center text-sm font-medium">
+                        {c.quantity}
+                      </span>
+                      <button
+                        onClick={() => updateQty(c.menu_item_id, 1)}
+                        className="w-8 h-8 rounded-md border border-stone-300 text-stone-600 hover:bg-stone-50 text-lg leading-none"
+                      >
+                        +
+                      </button>
+                      <span className="ml-auto text-xs text-stone-400">
+                        {formatMoney(c.price)} each
+                      </span>
                     </div>
                     <input
                       value={c.notes}
@@ -442,7 +546,9 @@ export default function OrderTaking() {
 
             <div className="flex items-center justify-between border-t border-stone-200 pt-4 mb-4">
               <span className="font-medium text-stone-700">Total</span>
-              <span className="text-xl font-bold text-stone-900">{formatMoney(total)}</span>
+              <span className="text-xl font-bold text-stone-900">
+                {formatMoney(total)}
+              </span>
             </div>
 
             <button
@@ -450,11 +556,25 @@ export default function OrderTaking() {
               disabled={submitting || cart.length === 0}
               className="w-full py-3 rounded-lg bg-brand-600 text-white font-semibold hover:bg-brand-700 disabled:opacity-50 transition-colors active:scale-[0.99]"
             >
-              {submitting ? 'Placing order…' : (hasKitchenInCart ? 'Send to kitchen' : 'Place order')}
+              {submitting
+                ? "Placing order…"
+                : hasKitchenInCart
+                  ? "Send to kitchen"
+                  : "Place order"}
             </button>
             <div className="flex items-center justify-between mt-3 text-sm">
-              <Link to="/admin/orders" className="text-brand-600 hover:text-brand-700">View order queue</Link>
-              <button onClick={() => setCart([])} className="text-stone-500 hover:text-stone-700">Clear cart</button>
+              <Link
+                to="/admin/orders"
+                className="text-brand-600 hover:text-brand-700"
+              >
+                View order queue
+              </Link>
+              <button
+                onClick={() => setCart([])}
+                className="text-stone-500 hover:text-stone-700"
+              >
+                Clear cart
+              </button>
             </div>
           </div>
         </div>

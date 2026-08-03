@@ -28,7 +28,7 @@ export default function Staff() {
   const isManager = me?.role === ROLES.MANAGER
   const isFullManager = me?.role === ROLES.OWNER || me?.role === ROLES.ADMIN
   const canEditRole = me?.role === ROLES.OWNER || me?.role === ROLES.ADMIN
-  // Managers can only assign roles below manager; owners/admins can assign any.
+ 
   const roleOptions = Object.entries(ROLE_LABELS).filter(([value]) =>
     canEditRole ? true : value !== ROLES.OWNER && value !== ROLES.ADMIN
   )

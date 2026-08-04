@@ -34,7 +34,9 @@ export default function OrderTaking() {
   const [mobileCartOpen, setMobileCartOpen] = useState(false);
   const searchRef = useRef(null);
   const { notifications, dismiss } = useOrderReadyNotifications(activeBranchId);
-
+  const canAccessBilling = ["owner", "admin", "manager", "cashier"].includes(
+    staff?.role,
+  );
   useEffect(() => {
     if (!activeBranchId) return;
     let active = true;
@@ -309,7 +311,12 @@ export default function OrderTaking() {
     setOrderNotes("");
     setSelectedTable(null);
     setMobileCartOpen(false);
-    navigate("/admin/billing", { state: { newOrderId: order.id } });
+    if (canAccessBilling) {
+      navigate("/admin/billing", { state: { newOrderId: order.id } });
+    } else {
+      navigate("/admin/orders");
+    }
+    // navigate("/admin/billing", { state: { newOrderId: order.id } });
   };
 
   submitRef.current = submitOrder;

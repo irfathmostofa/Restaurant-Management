@@ -91,6 +91,38 @@ function SidebarContent({
   );
 }
 
+function HeaderClock() {
+  const [now, setNow] = useState(new Date());
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  const dateStr = now.toLocaleDateString(undefined, {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+  });
+  const timeStr = now.toLocaleTimeString(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: true, // force AM/PM regardless of the device's regional 24h setting
+  });
+
+  return (
+    <div className="text-stone-500 tabular-nums leading-tight">
+      <div className="flex flex-col sm:hidden text-[11px]">
+        <span>{dateStr}</span>
+        <span className="font-medium text-stone-600 uppercase">{timeStr}</span>
+      </div>
+      <div className="hidden sm:block text-sm whitespace-nowrap">
+        {dateStr} · {timeStr}
+      </div>
+    </div>
+  );
+}
+
 export default function AdminShell() {
   const { staff, session } = useAuth();
   const {
@@ -108,29 +140,6 @@ export default function AdminShell() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const menuRef = useRef(null);
-
-  function HeaderClock() {
-    const [now, setNow] = useState(new Date());
-    useEffect(() => {
-      const t = setInterval(() => setNow(new Date()), 1000);
-      return () => clearInterval(t);
-    }, []);
-    return (
-      <div className="text-sm text-stone-500 tabular-nums">
-        {now.toLocaleDateString(undefined, {
-          weekday: "short",
-          month: "short",
-          day: "numeric",
-        })}
-        {" · "}
-        {now.toLocaleTimeString(undefined, {
-          hour: "2-digit",
-          minute: "2-digit",
-          second: "2-digit",
-        })}
-      </div>
-    );
-  }
 
   // Close user menu when clicking outside
   useEffect(() => {
@@ -221,26 +230,42 @@ export default function AdminShell() {
           sidebarCollapsed ? "lg:ml-16" : "lg:ml-64"
         }`}
       >
-        <header className="sticky top-0 z-20 bg-white border-b border-stone-200 px-4 sm:px-6 py-3 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3 min-w-0">
+        <header className="sticky top-0 z-20 bg-white border-b border-stone-200 px-3 sm:px-6 py-3 flex items-center justify-between gap-2 sm:gap-3">
+          <div className="flex items-center gap-1 sm:gap-3 min-w-0">
+            {/* Mobile: opens the drawer (this was missing — nothing else
+               on small screens could ever set mobileOpen to true) */}
             <button
-              onClick={toggleSidebar}
-              className="hidden lg:flex items-center justify-center w-8 h-8 rounded-lg hover:bg-stone-100 text-stone-600 hover:text-stone-800 transition-colors"
-              title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+              onClick={() => setMobileOpen(true)}
+              aria-label="Open menu"
+              className="lg:hidden flex items-center justify-center w-9 h-9 -ml-1 rounded-lg text-stone-600 hover:bg-stone-100 shrink-0"
             >
-              <Icon name="control" className="w-5 h-5" />
+              <Icon name="menu" className="w-5 h-5" />
             </button>
 
-            <HeaderClock />
+            {/* Desktop: collapse/expand the fixed sidebar */}
+            <button
+              onClick={toggleSidebar}
+              aria-label={
+                sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"
+              }
+              title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+              className="hidden lg:flex items-center justify-center w-8 h-8 rounded-lg hover:bg-stone-100 text-stone-600 hover:text-stone-800 transition-colors shrink-0"
+            >
+              <Icon name="menu" className="w-5 h-5" />
+            </button>
+
+            <div className="min-w-0">
+              <HeaderClock />
+            </div>
           </div>
 
-          <div className="flex items-center gap-3 min-w-0">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
             {canSwitchBranches ? (
               <select
                 value={activeBranchId ?? ""}
                 onChange={(e) => setActiveBranchId(e.target.value)}
                 aria-label="Branch"
-                className="px-3 py-2 rounded-lg border border-stone-300 bg-white text-sm text-stone-800 focus:outline-none focus:ring-2 focus:ring-brand-500 max-w-[45vw] sm:max-w-none"
+                className="px-2.5 sm:px-3 py-2 rounded-lg border border-stone-300 bg-white text-xs sm:text-sm text-stone-800 focus:outline-none focus:ring-2 focus:ring-brand-500 max-w-[38vw] sm:max-w-none truncate"
               >
                 {!activeBranchId && <option value="">Select branch</option>}
                 {branches.map((b) => (
@@ -250,13 +275,13 @@ export default function AdminShell() {
                 ))}
               </select>
             ) : activeBranch ? (
-              <span className="text-sm font-medium text-stone-600 truncate">
+              <span className="hidden sm:inline text-sm font-medium text-stone-600 truncate">
                 Branch: {activeBranch.name}
               </span>
             ) : null}
 
             {/* User menu dropdown */}
-            <div className="relative" ref={menuRef}>
+            <div className="relative shrink-0" ref={menuRef}>
               <button
                 onClick={toggleUserMenu}
                 className="flex items-center justify-center w-9 h-9 rounded-full bg-brand-100 text-brand-700 font-bold text-sm shrink-0 hover:bg-brand-200 transition-colors focus:outline-none focus:ring-2 focus:ring-brand-500"
@@ -275,7 +300,7 @@ export default function AdminShell() {
 
               {/* Dropdown menu */}
               {userMenuOpen && (
-                <div className="absolute right-0 mt-2 w-64 bg-white rounded-lg shadow-lg border border-stone-200 py-1 z-50">
+                <div className="absolute right-0 mt-2 w-64 max-w-[90vw] bg-white rounded-lg shadow-lg border border-stone-200 py-1 z-50">
                   <div className="px-4 py-3 border-b border-stone-100">
                     <div className="font-medium text-stone-800">
                       {staff.name}

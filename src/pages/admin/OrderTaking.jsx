@@ -31,6 +31,7 @@ export default function OrderTaking() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
   const [variantPickerItem, setVariantPickerItem] = useState(null);
+  const [mobileCartOpen, setMobileCartOpen] = useState(false);
   const searchRef = useRef(null);
   const { notifications, dismiss } = useOrderReadyNotifications(activeBranchId);
 
@@ -162,7 +163,6 @@ export default function OrderTaking() {
     setVariantPickerItem(null);
   };
 
-  // Total units of a base item currently in the cart, across all its variants.
   const cartCountForItem = (itemId) =>
     cart
       .filter((c) => c.menu_item_id === itemId)
@@ -308,11 +308,120 @@ export default function OrderTaking() {
     setCustomerName("");
     setOrderNotes("");
     setSelectedTable(null);
+    setMobileCartOpen(false);
     navigate("/admin/billing", { state: { newOrderId: order.id } });
   };
 
   submitRef.current = submitOrder;
   canSubmitRef.current = cart.length > 0 && !submitting;
+
+  const CartBody = () => (
+    <>
+      <div className="px-5 py-4 border-b border-stone-700 flex items-center justify-between shrink-0">
+        <div className="min-w-0">
+          <h2 className="font-bold">Current order</h2>
+          <span className="text-xs text-stone-400">
+            {orderType === "dine-in"
+              ? selectedTableInfo
+                ? `Table ${selectedTableInfo.number}`
+                : "No table selected"
+              : "Takeaway"}
+          </span>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <span className="text-xs font-semibold rounded-full bg-stone-700 px-2.5 py-1">
+            {totalQty} item{totalQty === 1 ? "" : "s"}
+          </span>
+          <button
+            onClick={() => setMobileCartOpen(false)}
+            className="xl:hidden w-7 h-7 flex items-center justify-center rounded-full hover:bg-stone-700 text-stone-300"
+          >
+            ✕
+          </button>
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-y-auto px-5 py-3 min-h-0">
+        {cart.length === 0 ? (
+          <p className="text-sm text-stone-400 text-center py-10">
+            Tap items to add them.
+          </p>
+        ) : (
+          <ul className="space-y-2.5">
+            {cart.map((c) => (
+              <li key={c.key} className="bg-stone-800 rounded-lg p-3">
+                <div className="flex items-center justify-between mb-1.5 gap-2">
+                  <span className="font-medium text-sm">{c.name}</span>
+                  <span className="text-sm font-bold whitespace-nowrap">
+                    {formatMoney(c.price * c.quantity)}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 mb-2">
+                  <button
+                    onClick={() => updateQty(c.key, -1)}
+                    className="w-7 h-7 rounded-md bg-stone-700 hover:bg-stone-600 text-lg leading-none"
+                  >
+                    −
+                  </button>
+                  <span className="w-6 text-center text-sm font-semibold">
+                    {c.quantity}
+                  </span>
+                  <button
+                    onClick={() => updateQty(c.key, 1)}
+                    className="w-7 h-7 rounded-md bg-stone-700 hover:bg-stone-600 text-lg leading-none"
+                  >
+                    +
+                  </button>
+                  <span className="ml-auto text-xs text-stone-400">
+                    {formatMoney(c.price)} each
+                  </span>
+                </div>
+                <input
+                  value={c.notes}
+                  onChange={(e) => setNotes(c.key, e.target.value)}
+                  placeholder="Notes (e.g. no onions)"
+                  className="w-full px-2.5 py-1.5 rounded-md bg-stone-900 border border-stone-700 text-xs text-white placeholder-stone-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                />
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      <div className="px-5 pt-3 pb-5 border-t border-stone-700 shrink-0">
+        {error && <p className="text-sm text-red-400 mb-3">{error}</p>}
+        <div className="flex items-center justify-between mb-4">
+          <span className="text-stone-300 font-medium">Total</span>
+          <span className="text-2xl font-bold">{formatMoney(total)}</span>
+        </div>
+        <button
+          onClick={submitOrder}
+          disabled={submitting || cart.length === 0}
+          className="w-full py-3.5 rounded-lg bg-brand-600 text-white font-bold hover:bg-brand-700 disabled:opacity-40 transition-colors active:scale-[0.99]"
+        >
+          {submitting
+            ? "Placing order…"
+            : hasKitchenInCart
+              ? "Send to kitchen"
+              : "Place order"}
+        </button>
+        <div className="flex items-center justify-between mt-3 text-sm">
+          <Link
+            to="/admin/orders"
+            className="text-brand-400 hover:text-brand-300"
+          >
+            View order queue
+          </Link>
+          <button
+            onClick={() => setCart([])}
+            className="text-stone-400 hover:text-stone-200"
+          >
+            Clear cart
+          </button>
+        </div>
+      </div>
+    </>
+  );
 
   return (
     <div>
@@ -344,11 +453,11 @@ export default function OrderTaking() {
 
       {/* Order context bar */}
       <div className="bg-white rounded-xl border border-stone-200 p-4 mb-4">
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="flex rounded-lg border border-stone-300 overflow-hidden shrink-0">
+        <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-3">
+          <div className="flex rounded-lg border border-stone-300 overflow-hidden shrink-0 w-full sm:w-auto">
             <button
               onClick={() => setOrderType("dine-in")}
-              className={`px-4 py-2 text-sm font-semibold transition-colors ${orderType === "dine-in" ? "bg-brand-600 text-white" : "bg-white text-stone-600 hover:bg-stone-50"}`}
+              className={`flex-1 sm:flex-none px-4 py-2 text-sm font-semibold transition-colors ${orderType === "dine-in" ? "bg-brand-600 text-white" : "bg-white text-stone-600 hover:bg-stone-50"}`}
             >
               🍽 Dine-in
             </button>
@@ -357,18 +466,18 @@ export default function OrderTaking() {
                 setOrderType("takeaway");
                 setSelectedTable(null);
               }}
-              className={`px-4 py-2 text-sm font-semibold transition-colors ${orderType === "takeaway" ? "bg-brand-600 text-white" : "bg-white text-stone-600 hover:bg-stone-50"}`}
+              className={`flex-1 sm:flex-none px-4 py-2 text-sm font-semibold transition-colors ${orderType === "takeaway" ? "bg-brand-600 text-white" : "bg-white text-stone-600 hover:bg-stone-50"}`}
             >
               🥡 Takeaway
             </button>
           </div>
 
           {orderType === "dine-in" && (
-            <div className="shrink-0">
+            <div className="w-full sm:w-auto shrink-0 flex items-center gap-2">
               <select
                 value={selectedTable ?? ""}
                 onChange={(e) => setSelectedTable(e.target.value || null)}
-                className={`px-3 py-2 rounded-lg border text-sm font-medium bg-white focus:outline-none focus:ring-2 focus:ring-brand-500 ${!selectedTable ? "border-amber-300 text-amber-700" : "border-stone-300 text-stone-800"}`}
+                className={`w-full sm:w-auto px-3 py-2 rounded-lg border text-sm font-medium bg-white focus:outline-none focus:ring-2 focus:ring-brand-500 ${!selectedTable ? "border-amber-300 text-amber-700" : "border-stone-300 text-stone-800"}`}
               >
                 <option value="">Select table…</option>
                 {availableTables.map((t) => (
@@ -378,7 +487,7 @@ export default function OrderTaking() {
                 ))}
               </select>
               {occupiedCount > 0 && (
-                <span className="ml-2 text-xs text-stone-400">
+                <span className="text-xs text-stone-400 whitespace-nowrap">
                   {occupiedCount} occupied
                 </span>
               )}
@@ -389,29 +498,31 @@ export default function OrderTaking() {
             value={customerName}
             onChange={(e) => setCustomerName(e.target.value)}
             placeholder="Customer name (optional)"
-            className="flex-1 min-w-[160px] px-3 py-2 rounded-lg border border-stone-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+            className="w-full sm:flex-1 sm:min-w-[160px] px-3 py-2 rounded-lg border border-stone-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
           />
           <input
             value={orderNotes}
             onChange={(e) => setOrderNotes(e.target.value)}
             placeholder="Order notes (optional)"
-            className="flex-1 min-w-[180px] px-3 py-2 rounded-lg border border-stone-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+            className="w-full sm:flex-1 sm:min-w-[180px] px-3 py-2 rounded-lg border border-stone-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
           />
         </div>
       </div>
-      <div className="mb-2">
-        <div className="flex items-center gap-2 bg-white rounded-xl border border-stone-200 p-3 xl:sticky xl:top-24">
+
+      {/* Search + category filter bar */}
+      <div className="mb-4 bg-white rounded-xl border border-stone-200 p-3 xl:sticky xl:top-24 z-10">
+        <div className="flex flex-col sm:flex-row sm:items-center gap-3">
           <input
             ref={searchRef}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder='Search… "/"'
-            className="w-50 m-0 px-3 py-2 rounded-lg border border-stone-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+            placeholder='Search menu… (press "/")'
+            className="w-full sm:w-56 shrink-0 px-3 py-2 rounded-lg border border-stone-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
           />
-          <div className="">
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 -mb-1 sm:pb-0 sm:mb-0 ">
             <button
               onClick={() => setActiveCategory("all")}
-              className={`shrink-0 text-left px-3 py-2 rounded-lg text-sm font-medium transition-colors ${activeCategory === "all" ? "bg-brand-600 text-white" : "text-stone-600 hover:bg-stone-100"}`}
+              className={`shrink-0 px-3 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${activeCategory === "all" ? "bg-brand-600 text-white" : "text-stone-600 hover:bg-stone-100"}`}
             >
               All items
             </button>
@@ -419,7 +530,7 @@ export default function OrderTaking() {
               <button
                 key={cat.id}
                 onClick={() => setActiveCategory(cat.id)}
-                className={`shrink-0 text-left px-3 py-2 rounded-lg text-sm font-medium transition-colors ${activeCategory === cat.id ? "bg-brand-600 text-white" : "text-stone-600 hover:bg-stone-100"}`}
+                className={`shrink-0 px-3 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${activeCategory === cat.id ? "bg-brand-600 text-white" : "text-stone-600 hover:bg-stone-100"}`}
               >
                 {cat.name}
               </button>
@@ -427,12 +538,11 @@ export default function OrderTaking() {
           </div>
         </div>
       </div>
-      <div className="flex flex-col xl:flex-row gap-4">
-        {/* Category sidebar */}
 
+      <div className="flex flex-col xl:flex-row gap-4">
         {/* Product grid */}
         <div className="flex-1 min-w-0">
-          <div className="bg-white rounded-xl border border-stone-200 p-4">
+          <div className="bg-white rounded-xl border border-stone-200 p-4 xl:h-[calc(100vh-260px)] xl:flex xl:flex-col overflow-hidden">
             {loading ? (
               <p className="text-stone-500 py-10 text-center">Loading menu…</p>
             ) : visibleItems.length === 0 ? (
@@ -446,170 +556,108 @@ export default function OrderTaking() {
                 </Link>
               </p>
             ) : (
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 max-h-[calc(100vh-360px)] min-h-[320px] overflow-y-auto pr-1">
-                {visibleItems.map((item) => {
-                  const hasVariants = item.variants && item.variants.length > 0;
-                  const inCartQty = cartCountForItem(item.id);
-                  return (
-                    <button
-                      key={item.id}
-                      onClick={() => handleItemTap(item)}
-                      className="relative text-left rounded-xl border-2 border-stone-200 hover:border-brand-500 bg-white hover:shadow-md transition-all active:scale-[0.97] overflow-hidden"
-                    >
-                      {inCartQty > 0 && (
-                        <span className="absolute top-2 right-2 z-10 min-w-[22px] h-[22px] px-1 flex items-center justify-center rounded-full bg-brand-600 text-white text-xs font-bold shadow">
-                          {inCartQty}
-                        </span>
-                      )}
-                      <div className="h-20 bg-stone-100 flex items-center justify-center">
-                        {item.photo_url ? (
-                          <img
-                            src={item.photo_url}
-                            alt={item.name}
-                            className="w-full h-full object-cover"
-                            loading="lazy"
-                          />
-                        ) : (
-                          <span className="text-2xl text-stone-300">🍽</span>
+              <div className=" h-full overflow-y-auto">
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4 gap-3 xl:gap-4">
+                  {visibleItems.map((item) => {
+                    const hasVariants =
+                      item.variants && item.variants.length > 0;
+                    const inCartQty = cartCountForItem(item.id);
+                    return (
+                      <button
+                        key={item.id}
+                        onClick={() => handleItemTap(item)}
+                        className="relative flex flex-col text-left rounded-xl border-2 border-stone-200 hover:border-brand-500 bg-white hover:shadow-md transition-all active:scale-[0.97] overflow-hidden h-full"
+                      >
+                        {inCartQty > 0 && (
+                          <span className="absolute top-2 right-2 z-10 min-w-[22px] h-[22px] px-1 flex items-center justify-center rounded-full bg-brand-600 text-white text-xs font-bold shadow">
+                            {inCartQty}
+                          </span>
                         )}
-                      </div>
-                      <div className="p-2.5">
-                        <div className="font-semibold text-stone-800 text-sm leading-tight line-clamp-2 mb-1">
-                          {item.name}
+                        {/* Fixed aspect ratio so every card's image area is the
+                         same shape regardless of card width or row height. */}
+                        <div className="aspect-[4/2] w-full shrink-0 bg-stone-100 flex items-center justify-center overflow-hidden">
+                          {item.photo_url ? (
+                            <img
+                              src={item.photo_url}
+                              alt={item.name}
+                              className="w-full h-full object-cover"
+                              loading="lazy"
+                            />
+                          ) : (
+                            <span className="text-2xl text-stone-300">🍽</span>
+                          )}
                         </div>
-                        <div className="flex items-center justify-between">
-                          <span className="text-brand-700 text-sm font-bold whitespace-nowrap">
-                            {hasVariants
-                              ? `From ${formatMoney(item.price)}`
-                              : formatMoney(item.price)}
-                          </span>
-                          <span
-                            className={`shrink-0 text-[9px] font-bold uppercase tracking-wide rounded px-1.5 py-0.5 ${item.requires_kitchen !== false ? "bg-amber-100 text-amber-700" : "bg-emerald-100 text-emerald-700"}`}
-                          >
-                            {item.requires_kitchen !== false
-                              ? "Kitchen"
-                              : "Ready"}
-                          </span>
-                        </div>
-                        {hasVariants && (
-                          <div className="mt-1 text-[10px] font-medium text-blue-600">
-                            {item.variants.length} option
-                            {item.variants.length === 1 ? "" : "s"} →
+                        {/* flex-1 + min-h-0 guarantees this block always keeps
+                         its own space instead of collapsing when the grid
+                         stretches the card to match a taller row-sibling. */}
+                        <div className="p-2.5 lg:p-3.5 flex-1 min-h-0 flex flex-col">
+                          <div className="font-semibold text-stone-800 text-sm lg:text-[15px] leading-snug line-clamp-2 mb-1 lg:mb-1.5">
+                            {item.name}
                           </div>
-                        )}
-                      </div>
-                    </button>
-                  );
-                })}
+                          <div className="flex items-center justify-between mt-auto gap-1.5">
+                            <span className="text-brand-700 text-sm lg:text-base font-bold whitespace-nowrap">
+                              {hasVariants
+                                ? `From ${formatMoney(item.price)}`
+                                : formatMoney(item.price)}
+                            </span>
+                            <span
+                              className={`shrink-0 text-[9px] lg:text-[10px] font-bold uppercase tracking-wide rounded px-1.5 py-0.5 lg:px-2 lg:py-1 ${item.requires_kitchen !== false ? "bg-amber-100 text-amber-700" : "bg-emerald-100 text-emerald-700"}`}
+                            >
+                              {item.requires_kitchen !== false
+                                ? "Kitchen"
+                                : "Ready"}
+                            </span>
+                          </div>
+                          {hasVariants && (
+                            <div className="mt-1 lg:mt-1.5 text-[10px] lg:text-[11px] font-medium text-blue-600">
+                              {item.variants.length} option
+                              {item.variants.length === 1 ? "" : "s"} →
+                            </div>
+                          )}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             )}
           </div>
         </div>
 
-        {/* Cart / receipt panel */}
-        <div className="w-full xl:w-[380px] shrink-0">
-          <div
-            className="bg-stone-900 text-white rounded-xl overflow-hidden xl:sticky xl:top-24 flex flex-col"
-            style={{ maxHeight: "calc(100vh - 96px)" }}
-          >
-            <div className="px-5 py-4 border-b border-stone-700 flex items-center justify-between">
-              <div>
-                <h2 className="font-bold">Current order</h2>
-                <span className="text-xs text-stone-400 capitalize">
-                  {orderType === "dine-in"
-                    ? selectedTableInfo
-                      ? `Table ${selectedTableInfo.number}`
-                      : "No table selected"
-                    : "Takeaway"}
-                </span>
-              </div>
-              <span className="text-xs font-semibold rounded-full bg-stone-700 px-2.5 py-1">
-                {totalQty} item{totalQty === 1 ? "" : "s"}
-              </span>
-            </div>
-
-            <div className="flex-1 overflow-y-auto px-5 py-3">
-              {cart.length === 0 ? (
-                <p className="text-sm text-stone-400 text-center py-10">
-                  Tap items on the left to add them.
-                </p>
-              ) : (
-                <ul className="space-y-2.5">
-                  {cart.map((c) => (
-                    <li key={c.key} className="bg-stone-800 rounded-lg p-3">
-                      <div className="flex items-center justify-between mb-1.5 gap-2">
-                        <span className="font-medium text-sm">{c.name}</span>
-                        <span className="text-sm font-bold whitespace-nowrap">
-                          {formatMoney(c.price * c.quantity)}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-2 mb-2">
-                        <button
-                          onClick={() => updateQty(c.key, -1)}
-                          className="w-7 h-7 rounded-md bg-stone-700 hover:bg-stone-600 text-lg leading-none"
-                        >
-                          −
-                        </button>
-                        <span className="w-6 text-center text-sm font-semibold">
-                          {c.quantity}
-                        </span>
-                        <button
-                          onClick={() => updateQty(c.key, 1)}
-                          className="w-7 h-7 rounded-md bg-stone-700 hover:bg-stone-600 text-lg leading-none"
-                        >
-                          +
-                        </button>
-                        <span className="ml-auto text-xs text-stone-400">
-                          {formatMoney(c.price)} each
-                        </span>
-                      </div>
-                      <input
-                        value={c.notes}
-                        onChange={(e) => setNotes(c.key, e.target.value)}
-                        placeholder="Notes (e.g. no onions)"
-                        className="w-full px-2.5 py-1.5 rounded-md bg-stone-900 border border-stone-700 text-xs text-white placeholder-stone-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
-                      />
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-
-            <div className="px-5 pt-3 pb-5 border-t border-stone-700">
-              {error && <p className="text-sm text-red-400 mb-3">{error}</p>}
-              <div className="flex items-center justify-between mb-4">
-                <span className="text-stone-300 font-medium">Total</span>
-                <span className="text-2xl font-bold">{formatMoney(total)}</span>
-              </div>
-              <button
-                onClick={submitOrder}
-                disabled={submitting || cart.length === 0}
-                className="w-full py-3.5 rounded-lg bg-brand-600 text-white font-bold hover:bg-brand-700 disabled:opacity-40 transition-colors active:scale-[0.99]"
-              >
-                {submitting
-                  ? "Placing order…"
-                  : hasKitchenInCart
-                    ? "Send to kitchen"
-                    : "Place order"}
-              </button>
-              <div className="flex items-center justify-between mt-3 text-sm">
-                <Link
-                  to="/admin/orders"
-                  className="text-brand-400 hover:text-brand-300"
-                >
-                  View order queue
-                </Link>
-                <button
-                  onClick={() => setCart([])}
-                  className="text-stone-400 hover:text-stone-200"
-                >
-                  Clear cart
-                </button>
-              </div>
-            </div>
+        {/* Cart / receipt panel — desktop: fixed-height sticky column */}
+        <div className="hidden xl:block w-[380px] shrink-0">
+          <div className="bg-stone-900 text-white rounded-xl overflow-hidden sticky top-24 flex flex-col h-[calc(100vh-260px)]">
+            <CartBody />
           </div>
         </div>
       </div>
+
+      {cart.length > 0 && (
+        <button
+          onClick={() => setMobileCartOpen(true)}
+          className="xl:hidden fixed bottom-4 left-4 right-4 z-30 flex items-center justify-between gap-3 bg-stone-900 text-white rounded-xl px-5 py-3.5 shadow-xl active:scale-[0.99] transition-transform"
+        >
+          <span className="flex items-center gap-2 font-semibold text-sm">
+            <span className="w-6 h-6 flex items-center justify-center rounded-full bg-brand-600 text-xs">
+              {totalQty}
+            </span>
+            View order
+          </span>
+          <span className="font-bold">{formatMoney(total)}</span>
+        </button>
+      )}
+
+      {mobileCartOpen && (
+        <div className="xl:hidden fixed inset-0 z-40 flex items-end">
+          <div
+            className="absolute inset-0 bg-black/60"
+            onClick={() => setMobileCartOpen(false)}
+          />
+          <div className="relative w-full bg-stone-900 text-white rounded-t-2xl flex flex-col h-[85vh] max-h-[85vh]">
+            <CartBody />
+          </div>
+        </div>
+      )}
 
       {/* Variant picker */}
       <Modal

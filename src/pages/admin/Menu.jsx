@@ -29,18 +29,18 @@ export default function Menu() {
   const { formatMoney } = useCurrency();
 
   const [categories, setCategories] = useState([]);
-  const [items, setItems] = useState([]); // ALL global menu items
-  const [variantCounts, setVariantCounts] = useState({}); // menu_item_id -> count
-  const [branchMenu, setBranchMenu] = useState({}); // menu_item_id -> { id, is_available }
-  const [branches, setBranches] = useState([]); // for the "assign to branches" picker
+  const [items, setItems] = useState([]);
+  const [variantCounts, setVariantCounts] = useState({});
+  const [branchMenu, setBranchMenu] = useState({});
+  const [branches, setBranches] = useState([]);
   const [loading, setLoading] = useState(true);
 
   const [itemModal, setItemModal] = useState(false);
   const [itemEditing, setItemEditing] = useState(null);
   const [itemForm, setItemForm] = useState(emptyItem);
   const [assignedBranchIds, setAssignedBranchIds] = useState([]);
-  const [variants, setVariants] = useState([]); // working list while modal is open
-  const [removedVariantIds, setRemovedVariantIds] = useState([]); // existing DB ids to delete on save
+  const [variants, setVariants] = useState([]);
+  const [removedVariantIds, setRemovedVariantIds] = useState([]);
   const [variantsLoading, setVariantsLoading] = useState(false);
 
   const [catModal, setCatModal] = useState(false);
@@ -113,12 +113,7 @@ export default function Menu() {
     setItemEditing(item);
     setItemForm({ ...item, price: String(item.price) });
     const assigned = branches
-      .filter((b) => {
-        // We only know this branch's assignment map for sure (branchMenu);
-        // for other branches we don't have data loaded here, so just
-        // preselect the current branch based on what we know.
-        return b.id === activeBranchId && branchMenu[item.id];
-      })
+      .filter((b) => b.id === activeBranchId && branchMenu[item.id])
       .map((b) => b.id);
     setAssignedBranchIds(assigned);
     setRemovedVariantIds([]);
@@ -188,7 +183,6 @@ export default function Menu() {
     setSaving(true);
     setError(null);
 
-    // menu_items is GLOBAL — no branch_id on this table.
     const payload = {
       name: itemForm.name,
       description: itemForm.description,
@@ -228,8 +222,6 @@ export default function Menu() {
       itemId = data.id;
     }
 
-    // ---- Sync variants (menu_item_variants) ----
-    // Deletions first.
     if (removedVariantIds.length > 0) {
       const { error: delErr } = await supabase
         .from("menu_item_variants")
@@ -241,7 +233,6 @@ export default function Menu() {
         return;
       }
     }
-    // Updates (existing rows) and inserts (new rows), in one pass each.
     const toUpdate = variants.filter((v) => v.id);
     const toInsert = variants.filter((v) => !v.id);
 
@@ -278,20 +269,19 @@ export default function Menu() {
       }
     }
 
-    // Sync branch assignment: only touching the current branch's row here,
-    // since that's the only branch assignment this page has data for.
-    // (Assigning to OTHER branches happens from that branch's own Menu page.)
     const wantsCurrentBranch = assignedBranchIds.includes(activeBranchId);
     const alreadyAssigned = !!branchMenu[itemId];
 
     if (wantsCurrentBranch && !alreadyAssigned) {
-      await supabase.from("branch_menu_items").insert([
-        {
-          branch_id: activeBranchId,
-          menu_item_id: itemId,
-          is_available: true,
-        },
-      ]);
+      await supabase
+        .from("branch_menu_items")
+        .insert([
+          {
+            branch_id: activeBranchId,
+            menu_item_id: itemId,
+            is_available: true,
+          },
+        ]);
     } else if (!wantsCurrentBranch && alreadyAssigned) {
       await supabase
         .from("branch_menu_items")
@@ -315,7 +305,6 @@ export default function Menu() {
     e.preventDefault();
     setSaving(true);
     setError(null);
-    // categories is GLOBAL — no branch_id.
     const payload = {
       name: catForm.name,
       sort_order: Number(catForm.sort_order || 0),
@@ -339,8 +328,6 @@ export default function Menu() {
     if (!res.error) setCategories(res.data || []);
   };
 
-  // Toggle AVAILABILITY AT THIS BRANCH (branch_menu_items.is_available),
-  // not the global menu_items.is_available flag.
   const toggleAvailability = async (item) => {
     const entry = branchMenu[item.id];
     if (!entry) return;
@@ -355,7 +342,6 @@ export default function Menu() {
     });
   };
 
-  // Toggle the GLOBAL featured flag (affects all branches' public sites).
   const toggleFeatured = async (item) => {
     await supabase
       .from("menu_items")
@@ -374,7 +360,6 @@ export default function Menu() {
     });
   };
 
-  // Assign an existing global item to THIS branch.
   const assignToBranch = async (item) => {
     const { data, error } = await supabase
       .from("branch_menu_items")
@@ -394,7 +379,6 @@ export default function Menu() {
       });
   };
 
-  // Remove item from THIS branch only (unassign — does not touch other branches).
   const removeFromBranch = async (item) => {
     const entry = branchMenu[item.id];
     if (!entry) return;
@@ -410,7 +394,6 @@ export default function Menu() {
     setBranchMenu(next);
   };
 
-  // Permanently delete the item everywhere (all branches, all variants — cascade).
   const deleteItemEverywhere = async (item) => {
     if (
       !window.confirm(
@@ -450,13 +433,13 @@ export default function Menu() {
           <>
             <button
               onClick={openCreateCat}
-              className="px-4 py-2 rounded-lg border border-stone-300 text-sm font-medium text-stone-600 hover:bg-stone-50"
+              className="px-3 sm:px-4 py-2 rounded-lg border border-stone-300 text-sm font-medium text-stone-600 hover:bg-stone-50 whitespace-nowrap"
             >
               + Category
             </button>
             <button
               onClick={() => openCreateItem(null)}
-              className="px-4 py-2 bg-brand-600 text-white rounded-lg text-sm font-medium hover:bg-brand-700"
+              className="px-3 sm:px-4 py-2 bg-brand-600 text-white rounded-lg text-sm font-medium hover:bg-brand-700 whitespace-nowrap"
             >
               + Menu item
             </button>
@@ -481,7 +464,7 @@ export default function Menu() {
           </div>
         </EmptyState>
       ) : (
-        <div className="space-y-8">
+        <div className="space-y-6 sm:space-y-8">
           {categories.map((cat) => {
             const catItems = assignedItems.filter(
               (i) => i.category_id === cat.id,
@@ -491,138 +474,150 @@ export default function Menu() {
                 key={cat.id}
                 className="bg-white rounded-xl border border-stone-200 overflow-hidden"
               >
-                <div className="flex items-center justify-between px-5 py-3 bg-stone-50 border-b border-stone-200">
+                <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 sm:px-5 py-3 bg-stone-50 border-b border-stone-200">
                   <h2 className="font-semibold text-stone-900">{cat.name}</h2>
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-3 text-sm">
                     <button
                       onClick={() => openCreateItem(cat.id)}
-                      className="text-sm font-medium text-brand-600 hover:text-brand-700"
+                      className="font-medium text-brand-600 hover:text-brand-700"
                     >
                       + Add item
                     </button>
                     <button
                       onClick={() => openEditCat(cat)}
-                      className="text-sm font-medium text-stone-500 hover:text-stone-700"
+                      className="font-medium text-stone-500 hover:text-stone-700"
                     >
                       Edit
                     </button>
                     <button
                       onClick={() => deleteCat(cat)}
-                      className="text-sm font-medium text-red-500 hover:text-red-700"
+                      className="font-medium text-red-500 hover:text-red-700"
                     >
                       Delete
                     </button>
                   </div>
                 </div>
                 {catItems.length === 0 ? (
-                  <p className="px-5 py-4 text-sm text-stone-400 italic">
+                  <p className="px-4 sm:px-5 py-4 text-sm text-stone-400 italic">
                     No items assigned to this branch yet.
                   </p>
                 ) : (
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="text-left text-stone-500 border-b border-stone-100">
-                        <th className="px-5 py-2 font-medium">Item</th>
-                        <th className="px-5 py-2 font-medium">Price</th>
-                        <th className="px-5 py-2 font-medium">Kitchen</th>
-                        <th className="px-5 py-2 font-medium">
-                          At this branch
-                        </th>
-                        <th className="px-5 py-2 font-medium">Featured</th>
-                        <th className="px-5 py-2 font-medium text-right">
-                          Actions
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {catItems.map((item) => (
-                        <tr
-                          key={item.id}
-                          className="border-b border-stone-50 hover:bg-stone-50/50"
-                        >
-                          <td className="px-5 py-3">
-                            <div className="flex items-center gap-3">
-                              {item.photo_url ? (
-                                <img
-                                  src={item.photo_url}
-                                  alt={item.name}
-                                  className="w-10 h-10 rounded-lg object-cover shrink-0"
-                                />
-                              ) : (
-                                <div className="w-10 h-10 rounded-lg bg-stone-100 shrink-0" />
-                              )}
-                              <div>
-                                <div className="font-medium text-stone-800 flex items-center gap-1.5">
-                                  {item.name}
-                                  {variantCounts[item.id] > 0 && (
-                                    <span className="text-[10px] font-medium bg-blue-100 text-blue-700 rounded-full px-1.5 py-0.5">
-                                      {variantCounts[item.id]} option
-                                      {variantCounts[item.id] === 1 ? "" : "s"}
-                                    </span>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm min-w-[720px]">
+                      <thead>
+                        <tr className="text-left text-stone-500 border-b border-stone-100">
+                          <th className="px-4 sm:px-5 py-2 font-medium">
+                            Item
+                          </th>
+                          <th className="px-4 sm:px-5 py-2 font-medium">
+                            Price
+                          </th>
+                          <th className="px-4 sm:px-5 py-2 font-medium">
+                            Kitchen
+                          </th>
+                          <th className="px-4 sm:px-5 py-2 font-medium">
+                            At this branch
+                          </th>
+                          <th className="px-4 sm:px-5 py-2 font-medium">
+                            Featured
+                          </th>
+                          <th className="px-4 sm:px-5 py-2 font-medium text-right">
+                            Actions
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {catItems.map((item) => (
+                          <tr
+                            key={item.id}
+                            className="border-b border-stone-50 hover:bg-stone-50/50"
+                          >
+                            <td className="px-4 sm:px-5 py-3">
+                              <div className="flex items-center gap-3">
+                                {item.photo_url ? (
+                                  <img
+                                    src={item.photo_url}
+                                    alt={item.name}
+                                    className="w-10 h-10 rounded-lg object-cover shrink-0"
+                                  />
+                                ) : (
+                                  <div className="w-10 h-10 rounded-lg bg-stone-100 shrink-0" />
+                                )}
+                                <div>
+                                  <div className="font-medium text-stone-800 flex items-center gap-1.5 whitespace-nowrap">
+                                    {item.name}
+                                    {variantCounts[item.id] > 0 && (
+                                      <span className="text-[10px] font-medium bg-blue-100 text-blue-700 rounded-full px-1.5 py-0.5">
+                                        {variantCounts[item.id]} option
+                                        {variantCounts[item.id] === 1
+                                          ? ""
+                                          : "s"}
+                                      </span>
+                                    )}
+                                  </div>
+                                  {item.description && (
+                                    <div className="text-xs text-stone-500 max-w-[220px] sm:max-w-md truncate">
+                                      {item.description}
+                                    </div>
                                   )}
                                 </div>
-                                {item.description && (
-                                  <div className="text-xs text-stone-500 max-w-md truncate">
-                                    {item.description}
-                                  </div>
-                                )}
                               </div>
-                            </div>
-                          </td>
-                          <td className="px-5 py-3 text-stone-700">
-                            {formatMoney(item.price)}
-                          </td>
-                          <td className="px-5 py-3">
-                            <span
-                              className={`text-xs font-medium rounded-full px-2.5 py-0.5 ${item.requires_kitchen !== false ? "bg-amber-100 text-amber-700" : "bg-emerald-100 text-emerald-700"}`}
-                            >
-                              {item.requires_kitchen !== false
-                                ? "Kitchen"
-                                : "Ready"}
-                            </span>
-                          </td>
-                          <td className="px-5 py-3">
-                            <button
-                              onClick={() => toggleAvailability(item)}
-                              className={`text-xs font-medium rounded-full px-2.5 py-0.5 ${branchMenu[item.id]?.is_available ? "bg-emerald-100 text-emerald-700" : "bg-stone-100 text-stone-500"}`}
-                            >
-                              {branchMenu[item.id]?.is_available
-                                ? "Available"
-                                : "Sold out"}
-                            </button>
-                          </td>
-                          <td className="px-5 py-3">
-                            <button
-                              onClick={() => toggleFeatured(item)}
-                              className={`text-xs font-medium rounded-full px-2.5 py-0.5 ${item.is_featured ? "bg-purple-100 text-purple-700" : "bg-stone-100 text-stone-500"}`}
-                            >
-                              {item.is_featured ? "Featured" : "Show"}
-                            </button>
-                          </td>
-                          <td className="px-5 py-3 text-right space-x-3">
-                            <button
-                              onClick={() => openEditItem(item)}
-                              className="text-brand-600 hover:text-brand-700"
-                            >
-                              Edit
-                            </button>
-                            <button
-                              onClick={() => removeFromBranch(item)}
-                              className="text-stone-500 hover:text-stone-700"
-                            >
-                              Remove here
-                            </button>
-                            <button
-                              onClick={() => deleteItemEverywhere(item)}
-                              className="text-red-500 hover:text-red-700"
-                            >
-                              Delete
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                            </td>
+                            <td className="px-4 sm:px-5 py-3 text-stone-700 whitespace-nowrap">
+                              {formatMoney(item.price)}
+                            </td>
+                            <td className="px-4 sm:px-5 py-3">
+                              <span
+                                className={`text-xs font-medium rounded-full px-2.5 py-0.5 whitespace-nowrap ${item.requires_kitchen !== false ? "bg-amber-100 text-amber-700" : "bg-emerald-100 text-emerald-700"}`}
+                              >
+                                {item.requires_kitchen !== false
+                                  ? "Kitchen"
+                                  : "Ready"}
+                              </span>
+                            </td>
+                            <td className="px-4 sm:px-5 py-3">
+                              <button
+                                onClick={() => toggleAvailability(item)}
+                                className={`text-xs font-medium rounded-full px-2.5 py-0.5 whitespace-nowrap ${branchMenu[item.id]?.is_available ? "bg-emerald-100 text-emerald-700" : "bg-stone-100 text-stone-500"}`}
+                              >
+                                {branchMenu[item.id]?.is_available
+                                  ? "Available"
+                                  : "Sold out"}
+                              </button>
+                            </td>
+                            <td className="px-4 sm:px-5 py-3">
+                              <button
+                                onClick={() => toggleFeatured(item)}
+                                className={`text-xs font-medium rounded-full px-2.5 py-0.5 whitespace-nowrap ${item.is_featured ? "bg-purple-100 text-purple-700" : "bg-stone-100 text-stone-500"}`}
+                              >
+                                {item.is_featured ? "Featured" : "Show"}
+                              </button>
+                            </td>
+                            <td className="px-4 sm:px-5 py-3 text-right whitespace-nowrap space-x-3">
+                              <button
+                                onClick={() => openEditItem(item)}
+                                className="text-brand-600 hover:text-brand-700"
+                              >
+                                Edit
+                              </button>
+                              <button
+                                onClick={() => removeFromBranch(item)}
+                                className="text-stone-500 hover:text-stone-700"
+                              >
+                                Remove here
+                              </button>
+                              <button
+                                onClick={() => deleteItemEverywhere(item)}
+                                className="text-red-500 hover:text-red-700"
+                              >
+                                Delete
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 )}
               </div>
             );
@@ -630,7 +625,7 @@ export default function Menu() {
 
           {unassignedItems.length > 0 && (
             <div className="bg-white rounded-xl border border-stone-200 overflow-hidden">
-              <div className="px-5 py-3 bg-stone-50 border-b border-stone-200">
+              <div className="px-4 sm:px-5 py-3 bg-stone-50 border-b border-stone-200">
                 <h2 className="font-semibold text-stone-900">
                   Not yet on this branch's menu
                 </h2>
@@ -639,39 +634,41 @@ export default function Menu() {
                   {activeBranch.name} yet.
                 </p>
               </div>
-              <table className="w-full text-sm">
-                <tbody>
-                  {unassignedItems.map((item) => (
-                    <tr
-                      key={item.id}
-                      className="border-b border-stone-50 hover:bg-stone-50/50"
-                    >
-                      <td className="px-5 py-3">
-                        <div className="font-medium text-stone-800">
-                          {item.name}
-                        </div>
-                        <div className="text-xs text-stone-500">
-                          {
-                            categories.find((c) => c.id === item.category_id)
-                              ?.name
-                          }
-                        </div>
-                      </td>
-                      <td className="px-5 py-3 text-stone-700">
-                        {formatMoney(item.price)}
-                      </td>
-                      <td className="px-5 py-3 text-right">
-                        <button
-                          onClick={() => assignToBranch(item)}
-                          className="text-sm font-medium text-brand-600 hover:text-brand-700"
-                        >
-                          + Add to this branch
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm min-w-[480px]">
+                  <tbody>
+                    {unassignedItems.map((item) => (
+                      <tr
+                        key={item.id}
+                        className="border-b border-stone-50 hover:bg-stone-50/50"
+                      >
+                        <td className="px-4 sm:px-5 py-3">
+                          <div className="font-medium text-stone-800 whitespace-nowrap">
+                            {item.name}
+                          </div>
+                          <div className="text-xs text-stone-500">
+                            {
+                              categories.find((c) => c.id === item.category_id)
+                                ?.name
+                            }
+                          </div>
+                        </td>
+                        <td className="px-4 sm:px-5 py-3 text-stone-700 whitespace-nowrap">
+                          {formatMoney(item.price)}
+                        </td>
+                        <td className="px-4 sm:px-5 py-3 text-right whitespace-nowrap">
+                          <button
+                            onClick={() => assignToBranch(item)}
+                            className="text-sm font-medium text-brand-600 hover:text-brand-700"
+                          >
+                            + Add to this branch
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
         </div>
@@ -684,7 +681,7 @@ export default function Menu() {
         title={itemEditing ? "Edit menu item" : "New menu item"}
       >
         <form onSubmit={submitItem} className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-stone-700 mb-1">
                 Name *
@@ -786,7 +783,10 @@ export default function Menu() {
                 {variants.map((v) => {
                   const key = v.id ?? v._tempId;
                   return (
-                    <div key={key} className="flex items-center gap-2">
+                    <div
+                      key={key}
+                      className="flex flex-wrap items-center gap-2"
+                    >
                       <input
                         value={v.name}
                         onChange={(e) =>
@@ -794,7 +794,7 @@ export default function Menu() {
                         }
                         placeholder="e.g. Large"
                         required
-                        className="flex-1 px-3 py-1.5 rounded-lg border border-stone-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                        className="flex-1 min-w-[120px] px-3 py-1.5 rounded-lg border border-stone-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
                       />
                       <div className="flex items-center gap-1 shrink-0">
                         <span className="text-sm text-stone-400">+/-</span>
@@ -809,7 +809,7 @@ export default function Menu() {
                               e.target.value,
                             )
                           }
-                          className="w-24 px-2 py-1.5 rounded-lg border border-stone-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                          className="w-20 sm:w-24 px-2 py-1.5 rounded-lg border border-stone-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
                         />
                       </div>
                       <button
@@ -887,7 +887,7 @@ export default function Menu() {
             Featured on the public website
           </label>
           {error && <p className="text-sm text-red-600">{error}</p>}
-          <div className="flex justify-end gap-3 pt-2">
+          <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-3 pt-2">
             <button
               type="button"
               onClick={() => setItemModal(false)}
@@ -938,7 +938,7 @@ export default function Menu() {
             />
           </div>
           {error && <p className="text-sm text-red-600">{error}</p>}
-          <div className="flex justify-end gap-3 pt-2">
+          <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-3 pt-2">
             <button
               type="button"
               onClick={() => setCatModal(false)}

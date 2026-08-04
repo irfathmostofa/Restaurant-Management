@@ -145,7 +145,6 @@ export default function Login() {
           </p>
         </form>
 
-        {/* Demo credentials — for testing/reviewing only. */}
         <div className="mt-5 bg-white/5 border border-white/10 rounded-2xl backdrop-blur-sm overflow-hidden">
           <div className="px-4 py-3 border-b border-white/10 flex items-center gap-2">
             {/* <span className="text-amber-400 text-sm">⚠</span> */}

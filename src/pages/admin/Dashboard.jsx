@@ -150,7 +150,7 @@ export default function Dashboard() {
 
           const sorted = Object.values(itemMap)
             .sort((a, b) => b.quantity - a.quantity)
-            .slice(0, 5);
+            .slice(0, 7);
 
           setPopularItems(sorted);
         } else {

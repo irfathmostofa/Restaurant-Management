@@ -61,7 +61,7 @@ export default function Dashboard() {
 
     const load = async () => {
       try {
-        console.log("🚀 Loading dashboard for branch:", activeBranchId);
+        
 
         // Get today's date
         const today = new Date();
@@ -190,9 +190,7 @@ export default function Dashboard() {
           console.error("❌ Payment query error:", paymentError);
         }
 
-        console.log(
-          `💳 Payment query returned: ${paymentData?.length || 0} results`,
-        );
+        
 
         if (paymentData && paymentData.length > 0) {
           const orderIds = paymentData
@@ -341,14 +339,14 @@ export default function Dashboard() {
                 };
               });
 
-              console.log(`✅ Created ${salesData.length} sales from payments`);
+              
             }
           }
         }
 
         // Fallback: If no payments, try paid orders directly
         if (salesData.length === 0) {
-          console.log("🔄 No sales from payments, trying paid orders...");
+         
 
           const { data: paidOrders, error: paidOrdersError } = await supabase
             .from("orders")
@@ -432,15 +430,13 @@ export default function Dashboard() {
               };
             });
 
-            console.log(
-              `✅ Created ${salesData.length} sales from paid orders`,
-            );
+           
           }
         }
 
         if (!active) return;
         setRecentSales(salesData);
-        console.log(`🎯 FINAL: ${salesData.length} recent sales loaded`);
+        
       } catch (error) {
         console.error("❌ Fatal error loading dashboard:", error);
         setError("Failed to load dashboard data. Please refresh the page.");

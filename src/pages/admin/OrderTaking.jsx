@@ -299,9 +299,15 @@ export default function OrderTaking() {
       setError(null); // Clear any previous errors
       // You could add a success toast or notification here
     } else if (canAccessBilling) {
-      navigate("/admin/billing", { state: { newOrderId: order.id } });
+      success("Order placed! Redirecting to billing...", 2000);
+      setTimeout(() => {
+        navigate("/admin/billing", { state: { newOrderId: order.id } });
+      }, 1500);
     } else {
-      navigate("/admin/orders");
+      success("Order placed! Redirecting to orders...", 2000);
+      setTimeout(() => {
+        navigate("/admin/orders");
+      }, 1500);
     }
   };
 

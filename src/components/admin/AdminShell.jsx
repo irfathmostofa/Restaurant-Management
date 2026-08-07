@@ -11,6 +11,7 @@ import { fetchDefaultRoute } from "../../lib/config";
 import { logActivity } from "../../lib/activity";
 import Icon from "../Icon";
 import supabase from "../../lib/supabase";
+import { useToast } from "../Toast";
 
 function SidebarContent({
   staff,
@@ -136,6 +137,7 @@ export default function AdminShell() {
   const [homeRoute, setHomeRoute] = useState(
     DEFAULT_ROUTE_BY_ROLE[staff?.role] || "/admin/dashboard",
   );
+  const{success, warning, info} = useToast();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
@@ -178,8 +180,9 @@ export default function AdminShell() {
       description: `${staff?.name || "User"} signed out.`,
       branchId: activeBranch?.id,
     });
+    
     await supabase.auth.signOut();
-    navigate("/");
+    navigate("/admin/login");
   };
 
   return (

@@ -69,7 +69,7 @@ export const NAV_BY_ROLE = {
   ],
   waiter: [
     { to: "/admin/order-taking", label: "POS / Order", icon: "edit" },
-    // { to: '/admin/billing', label: 'Billing', icon: 'wallet' }
+    { to: "/admin/orders", label: "Orders", icon: "clipboard" },
   ],
   cashier: [
     { to: "/admin/order-taking", label: "POS / Order", icon: "edit" },
@@ -137,7 +137,7 @@ export const ROLE_ROUTES = {
     "expenses",
     "profile",
   ]),
-  waiter: new Set(["order-taking", "billing", "profile"]),
+  waiter: new Set(["order-taking", "orders", "profile"]),
   cashier: new Set(["order-taking", "billing", "profile"]),
   kitchen: new Set(["orders", "profile"]),
 };

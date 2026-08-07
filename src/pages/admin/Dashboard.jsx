@@ -542,7 +542,7 @@ export default function Dashboard() {
       ) : (
         <>
           {/* Stats Cards */}
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-8">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-3">
             {statCards.map((s) => (
               <Link
                 key={s.label}

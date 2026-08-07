@@ -311,11 +311,11 @@ export default function OrderTaking() {
     setOrderNotes("");
     setSelectedTable(null);
     setMobileCartOpen(false);
-    if (canAccessBilling) {
-      navigate("/admin/billing", { state: { newOrderId: order.id } });
-    } else {
-      navigate("/admin/orders");
-    }
+    // if (canAccessBilling) {
+    //   navigate("/admin/billing", { state: { newOrderId: order.id } });
+    // } else {
+    //   navigate("/admin/orders");
+    // }
     // navigate("/admin/billing", { state: { newOrderId: order.id } });
   };
 

@@ -146,7 +146,7 @@ export default function Settings() {
         title="Settings"
         subtitle="Restaurant-wide display info and configurable per-role landing pages."
       />
-      <div className=" flex flex-row items-start  gap-6">
+      <div className=" flex sm:flex-row flex-col items-start  gap-6">
         <form onSubmit={save} className="max-w-2xl space-y-6">
           <div className="bg-white rounded-xl border border-stone-200 p-6">
             <h2 className="font-semibold text-stone-900 mb-4">

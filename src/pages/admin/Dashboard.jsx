@@ -558,45 +558,6 @@ export default function Dashboard() {
           </div>
 
           <div className="grid md:grid-cols-2 gap-6">
-            {/* Popular Items */}
-            <div className="bg-white rounded-xl border border-stone-200 p-6">
-              <h2 className="font-semibold text-stone-900 mb-4">
-                🔥 Popular Items
-              </h2>
-              {popularItems.length > 0 ? (
-                <div className="space-y-3">
-                  {popularItems.map((item, index) => (
-                    <div
-                      key={item.menu_item_id || index}
-                      className="flex items-center gap-4"
-                    >
-                      <div className="flex-shrink-0 w-8 h-8 rounded-full bg-brand-100 text-brand-700 flex items-center justify-center font-bold text-sm">
-                        #{index + 1}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="font-medium text-stone-800 truncate">
-                          {item.name}
-                        </div>
-                        <div className="text-sm text-stone-500">
-                          {formatMoney(item.price)}
-                        </div>
-                      </div>
-                      <div className="flex-shrink-0 text-right">
-                        <div className="font-bold text-brand-600">
-                          {item.quantity}
-                        </div>
-                        <div className="text-xs text-stone-500">orders</div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-stone-400 text-center py-8">
-                  No popular items yet
-                </p>
-              )}
-            </div>
-
             {/* Recent Sales */}
             <div className="bg-white rounded-xl border border-stone-200 p-6">
               <h2 className="font-semibold text-stone-900 mb-4">
@@ -665,6 +626,44 @@ export default function Dashboard() {
                 >
                   View all invoices →
                 </Link>
+              )}
+            </div>
+            {/* Popular Items */}
+            <div className="bg-white rounded-xl border border-stone-200 p-6">
+              <h2 className="font-semibold text-stone-900 mb-4">
+                🔥 Popular Items
+              </h2>
+              {popularItems.length > 0 ? (
+                <div className="space-y-3">
+                  {popularItems.map((item, index) => (
+                    <div
+                      key={item.menu_item_id || index}
+                      className="flex items-center gap-4"
+                    >
+                      <div className="flex-shrink-0 w-8 h-8 rounded-full bg-brand-100 text-brand-700 flex items-center justify-center font-bold text-sm">
+                        #{index + 1}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="font-medium text-stone-800 truncate">
+                          {item.name}
+                        </div>
+                        <div className="text-sm text-stone-500">
+                          {formatMoney(item.price)}
+                        </div>
+                      </div>
+                      <div className="flex-shrink-0 text-right">
+                        <div className="font-bold text-brand-600">
+                          {item.quantity}
+                        </div>
+                        <div className="text-xs text-stone-500">orders</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-stone-400 text-center py-8">
+                  No popular items yet
+                </p>
               )}
             </div>
           </div>

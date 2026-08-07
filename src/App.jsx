@@ -7,6 +7,7 @@ import AdminRoute from "./components/AdminRoute";
 import AdminShell from "./components/admin/AdminShell";
 import PublicSite from "./components/public/PublicSite";
 import RoleHome from "./components/RoleHome";
+import ToastProvider from "./components/Toast";
 
 const Login = lazy(() => import("./pages/admin/Login"));
 const Forbidden = lazy(() => import("./pages/admin/Forbidden"));
@@ -33,41 +34,46 @@ export default function App() {
     <AuthProvider>
       <CurrencyProvider>
         <Suspense fallback={<PageLoader />}>
-          <Routes>
-            {/* Public customer website */}
-            <Route path="/" element={<PublicSite />} />
-            <Route path="/branch/:branchId" element={<PublicSite />} />
+          <ToastProvider>
+            <Routes>
+              {/* Public customer website */}
+              <Route path="/" element={<PublicSite />} />
+              <Route path="/branch/:branchId" element={<PublicSite />} />
 
-            {/* Admin portal */}
-            <Route path="/admin/login" element={<Login />} />
-            <Route path="/admin/forbidden" element={<Forbidden />} />
-            <Route path="/admin" element={<AdminRoute />}>
-              <Route element={<BranchProvider />}>
-                <Route element={<AdminShell />}>
-                  <Route index element={<RoleHome />} />
-                  <Route path="dashboard" element={<Dashboard />} />
-                  <Route path="branches" element={<Branches />} />
-                  <Route path="menu" element={<Menu />} />
-                  <Route path="tables" element={<Tables />} />
-                  <Route path="reservations" element={<Reservations />} />
-                  <Route path="staff" element={<Staff />} />
-                  <Route path="orders" element={<Orders />} />
-                  <Route path="reports" element={<Reports />} />
-                  <Route path="order-taking" element={<OrderTaking />} />
-                  <Route path="billing" element={<Billing />} />
-                  <Route path="payment-methods" element={<PaymentMethods />} />
-                  <Route path="settings" element={<Settings />} />
-                  <Route path="invoices" element={<Invoices />} />
-                  <Route path="expenses" element={<Expenses />} />
-                  <Route path="profile" element={<Profile />} />
-                  <Route path="activity-logs" element={<ActivityLogs />} />
-                  <Route path="tax-settings" element={<TaxSettings />} />
+              {/* Admin portal */}
+              <Route path="/admin/login" element={<Login />} />
+              <Route path="/admin/forbidden" element={<Forbidden />} />
+              <Route path="/admin" element={<AdminRoute />}>
+                <Route element={<BranchProvider />}>
+                  <Route element={<AdminShell />}>
+                    <Route index element={<RoleHome />} />
+                    <Route path="dashboard" element={<Dashboard />} />
+                    <Route path="branches" element={<Branches />} />
+                    <Route path="menu" element={<Menu />} />
+                    <Route path="tables" element={<Tables />} />
+                    <Route path="reservations" element={<Reservations />} />
+                    <Route path="staff" element={<Staff />} />
+                    <Route path="orders" element={<Orders />} />
+                    <Route path="reports" element={<Reports />} />
+                    <Route path="order-taking" element={<OrderTaking />} />
+                    <Route path="billing" element={<Billing />} />
+                    <Route
+                      path="payment-methods"
+                      element={<PaymentMethods />}
+                    />
+                    <Route path="settings" element={<Settings />} />
+                    <Route path="invoices" element={<Invoices />} />
+                    <Route path="expenses" element={<Expenses />} />
+                    <Route path="profile" element={<Profile />} />
+                    <Route path="activity-logs" element={<ActivityLogs />} />
+                    <Route path="tax-settings" element={<TaxSettings />} />
+                  </Route>
                 </Route>
               </Route>
-            </Route>
 
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          </ToastProvider>
         </Suspense>
       </CurrencyProvider>
     </AuthProvider>

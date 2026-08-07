@@ -5,15 +5,16 @@ import { useBranch } from "../../context/BranchContext";
 import { useAuth } from "../../context/AuthContext";
 import { useCurrency } from "../../context/CurrencyContext";
 import { fetchSettings, DEFAULT_SETTINGS } from "../../lib/config";
-import { buildKotHtml, openPrintWindow, printHtml } from "../../lib/printing";
 import { hasKitchenItems } from "../../lib/kitchen";
 import useOrderReadyNotifications from "../../hooks/useOrderReadyNotifications";
 import { logActivity } from "../../lib/activity";
 import PageHeader from "../../components/admin/PageHeader";
 import Modal from "../../components/admin/Modal";
+import { useToast } from "../../components/Toast";
 
 export default function OrderTaking() {
   const { activeBranch, activeBranchId } = useBranch();
+  const { success, warning, info } = useToast();
   const { staff } = useAuth();
   const { formatMoney } = useCurrency();
   const navigate = useNavigate();
@@ -37,6 +38,10 @@ export default function OrderTaking() {
   const canAccessBilling = ["owner", "admin", "manager", "cashier"].includes(
     staff?.role,
   );
+
+  // Check if user is a waiter
+  const isWaiter = staff?.role === "waiter";
+
   useEffect(() => {
     if (!activeBranchId) return;
     let active = true;
@@ -204,8 +209,6 @@ export default function OrderTaking() {
     setSubmitting(true);
     setError(null);
 
-    const kotWin = hasKitchenInCart ? openPrintWindow() : null;
-
     const { data: order, error: orderError } = await supabase
       .from("orders")
       .insert([
@@ -223,7 +226,6 @@ export default function OrderTaking() {
       .single();
 
     if (orderError) {
-      if (kotWin) kotWin.close();
       setError(orderError.message);
       setSubmitting(false);
       return;
@@ -263,7 +265,6 @@ export default function OrderTaking() {
               delError.message,
             );
         });
-      if (kotWin) kotWin.close();
       setSubmitting(false);
       setError(itemsError.message);
       return;
@@ -274,27 +275,6 @@ export default function OrderTaking() {
         .from("tables")
         .update({ status: "occupied" })
         .eq("id", selectedTable);
-    }
-
-    if (kotWin) {
-      const kitchenItems = cart.filter((c) => c.requires_kitchen);
-      const tableNumber =
-        orderType === "dine-in"
-          ? tables.find((t) => t.id === selectedTable)?.number
-          : null;
-      const html = buildKotHtml({
-        restaurantName:
-          settings.restaurant_name || DEFAULT_SETTINGS.restaurant_name,
-        branch: activeBranch,
-        orderNo: order.id.slice(0, 8).toUpperCase(),
-        tableNumber,
-        waiterName: staff?.name || "",
-        items: kitchenItems,
-        defaultPrepTime,
-        printTime: new Date().toISOString(),
-        logoUrl: settings.restaurant_logo || "",
-      });
-      printHtml(kotWin, html);
     }
 
     logActivity({
@@ -311,12 +291,18 @@ export default function OrderTaking() {
     setOrderNotes("");
     setSelectedTable(null);
     setMobileCartOpen(false);
-    // if (canAccessBilling) {
-    //   navigate("/admin/billing", { state: { newOrderId: order.id } });
-    // } else {
-    //   navigate("/admin/orders");
-    // }
-    // navigate("/admin/billing", { state: { newOrderId: order.id } });
+    success("Order placed successfully!", 3000);
+    // Redirect logic based on role
+    if (isWaiter) {
+      // Waiter stays on the same page - no navigation
+      // Optionally show a success message
+      setError(null); // Clear any previous errors
+      // You could add a success toast or notification here
+    } else if (canAccessBilling) {
+      navigate("/admin/billing", { state: { newOrderId: order.id } });
+    } else {
+      navigate("/admin/orders");
+    }
   };
 
   submitRef.current = submitOrder;
